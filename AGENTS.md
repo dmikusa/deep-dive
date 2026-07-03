@@ -1,0 +1,24 @@
+# Agent Instructions
+
+This project follows the implementation plan in `docs/plan.md`.
+
+Before working on any task, read the plan document to understand:
+- The architecture and design decisions
+- The current phase of implementation
+- The process rules for phase completion
+
+## Quick Reference
+
+- **Build**: `cargo build`
+- **Test**: `cargo test`
+- **Lint**: `cargo clippy -- -D warnings`
+- **Format**: `cargo fmt`
+- **Run**: `cargo run -- <image-uri>`
+
+## Process Rules
+
+1. Every phase must include tests for all new functionality
+2. All tests must pass before a phase is complete
+3. Each phase ends with a single git commit
+4. No work may be deferred without explicit human confirmation
+5. After completing a phase, present a review to the human before proceeding
