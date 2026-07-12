@@ -19,6 +19,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 flate2 = "1"
 zstd = "0.13"
+tar = "0.4"
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 sha2 = "0.10"
 tracing = "0.1"
