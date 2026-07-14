@@ -80,6 +80,14 @@ pub struct FileTree {
     sort_mode: SortMode,
 }
 
+/// A rendered line of the file tree, including its diff type for styling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderedLine {
+    pub text: String,
+    pub diff_type: DiffType,
+    pub path: String,
+}
+
 impl FileTree {
     pub fn new() -> Self {
         Self {
@@ -255,9 +263,9 @@ impl FileTree {
         }
     }
 
-    /// Render the visible tree as a list of lines, returning only rows in the
+    /// Render the visible tree with diff-type metadata, returning rows in the
     /// half-open range `[start_row, stop_row)`.
-    pub fn render_string_tree(&self, start_row: usize, stop_row: usize) -> Vec<String> {
+    pub fn render_tree(&self, start_row: usize, stop_row: usize) -> Vec<RenderedLine> {
         let mut lines = Vec::new();
         Self::render_node(&self.root, "", true, &mut lines, self.sort_mode);
         lines
@@ -267,11 +275,19 @@ impl FileTree {
             .collect()
     }
 
+    /// Render the visible tree as plain strings.
+    pub fn render_string_tree(&self, start_row: usize, stop_row: usize) -> Vec<String> {
+        self.render_tree(start_row, stop_row)
+            .into_iter()
+            .map(|line| line.text)
+            .collect()
+    }
+
     fn render_node(
         node: &FileNode,
         prefix: &str,
         is_last: bool,
-        lines: &mut Vec<String>,
+        lines: &mut Vec<RenderedLine>,
         sort_mode: SortMode,
     ) {
         if node.path.as_os_str() != "/" {
@@ -281,7 +297,11 @@ impl FileTree {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "/".to_string());
-            lines.push(format!("{}{}{}", prefix, branch, name));
+            lines.push(RenderedLine {
+                text: format!("{}{}{}", prefix, branch, name),
+                diff_type: node.diff_type,
+                path: node.path.to_string_lossy().into_owned(),
+            });
         }
 
         if node.collapsed {
@@ -340,6 +360,26 @@ impl FileTree {
     /// Mark every node in the tree with the given diff type.
     pub fn mark_all(&mut self, diff_type: DiffType) {
         Self::mark_subtree(&mut self.root, diff_type);
+    }
+
+    /// Return the paths of all visible (non-collapsed) nodes in render order,
+    /// excluding the root node.
+    pub fn visible_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        Self::collect_visible_paths(&self.root, &mut paths, self.sort_mode);
+        paths
+    }
+
+    fn collect_visible_paths(node: &FileNode, paths: &mut Vec<String>, sort_mode: SortMode) {
+        if node.path.as_os_str() != "/" {
+            paths.push(node.path.to_string_lossy().into_owned());
+        }
+        if node.collapsed {
+            return;
+        }
+        for child in Self::sorted_children(&node.children, sort_mode) {
+            Self::collect_visible_paths(child, paths, sort_mode);
+        }
     }
 }
 
