@@ -42,13 +42,15 @@ struct DockerManifest {
 
 #[derive(Deserialize)]
 struct HistoryEntry {
-    created_by: String,
+    #[serde(default)]
+    created_by: Option<String>,
     #[serde(default)]
     empty_layer: Option<bool>,
 }
 
 #[derive(Deserialize)]
 struct ImageConfig {
+    #[serde(default)]
     history: Vec<HistoryEntry>,
 }
 
@@ -141,7 +143,7 @@ pub fn parse_docker_save_tar(reader: impl Read) -> Result<Image> {
 
         let command = non_empty_history
             .get(i)
-            .map(|h| strip_command_prefix(&h.created_by))
+            .and_then(|h| h.created_by.as_deref().map(strip_command_prefix))
             .unwrap_or_default();
 
         layers.push(Layer {
@@ -225,7 +227,7 @@ pub fn parse_oci_layout(path: &Path) -> Result<Image> {
 
         let command = non_empty_history
             .get(i)
-            .map(|h| strip_command_prefix(&h.created_by))
+            .and_then(|h| h.created_by.as_deref().map(strip_command_prefix))
             .unwrap_or_default();
 
         layers.push(Layer {

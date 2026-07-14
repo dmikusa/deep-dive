@@ -10,6 +10,7 @@ mod utils;
 
 use cli::Cli;
 use image::docker::archive::DockerArchiveResolver;
+use image::docker::engine::DockerEngineResolver;
 use image::oci::layout::OciLayoutResolver;
 use image::resolver::Resolver;
 use image::Image;
@@ -21,12 +22,20 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("deep-dive starting for image: {}", args.image);
 
-    let mut loader = tui::loader::Loader::new(format!("Loading {}", args.image));
-    let result = resolve_image(&args.image).await;
-    loader.stop();
+    let image = if is_docker_uri(&args.image) {
+        DockerEngineResolver::new()?.fetch(&args.image).await
+    } else {
+        let mut loader = tui::loader::Loader::new(format!("Loading {}", args.image));
+        let result = resolve_image(&args.image).await;
+        loader.stop();
+        result
+    }?;
 
-    let image = result?;
     tui::app::run(image).await
+}
+
+fn is_docker_uri(uri: &str) -> bool {
+    uri.starts_with("docker://") || !uri.contains("://")
 }
 
 fn init_tracing(args: &Cli) {
@@ -50,20 +59,15 @@ async fn resolve_image(uri: &str) -> anyhow::Result<Image> {
         DockerArchiveResolver::new().fetch(uri).await
     } else if uri.starts_with("oci://") {
         OciLayoutResolver::new().fetch(uri).await
-    } else if uri.starts_with("docker://") {
-        anyhow::bail!(
-            "Docker daemon resolver is not yet implemented (coming in Phase 5). \
-             Use docker-archive://path/to/image.tar instead."
-        )
     } else if uri.starts_with("registry://") {
         anyhow::bail!(
             "Registry resolver is not yet implemented (coming in Phase 10). \
-             Use docker-archive://path/to/image.tar or oci://path/to/layout instead."
+             Use docker://, docker-archive://path/to/image.tar, or oci://path/to/layout instead."
         )
     } else if uri.starts_with("podman://") {
         anyhow::bail!(
             "Podman resolver is not yet implemented (coming in Phase 11). \
-             Use docker-archive://path/to/image.tar instead."
+             Use docker://, docker-archive://path/to/image.tar, or oci://path/to/layout instead."
         )
     } else {
         anyhow::bail!(
@@ -86,9 +90,11 @@ mod tests {
         assert!(err.to_string().contains("Unsupported image URI"));
     }
 
-    #[tokio::test]
-    async fn test_resolve_image_docker_scheme_not_implemented() {
-        let err = resolve_image("docker://ubuntu:latest").await.unwrap_err();
-        assert!(err.to_string().contains("Phase 5"));
+    #[test]
+    fn test_is_docker_uri() {
+        assert!(is_docker_uri("docker://ubuntu:latest"));
+        assert!(is_docker_uri("ubuntu:latest"));
+        assert!(!is_docker_uri("docker-archive://image.tar"));
+        assert!(!is_docker_uri("oci://layout"));
     }
 }
