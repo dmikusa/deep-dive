@@ -36,10 +36,62 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
 
         if let Event::Key(key) = event {
             if key.kind == KeyEventKind::Press {
+                if state.is_filter_active {
+                    handle_filter_key(state, key);
+                    continue;
+                }
+
+                let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
                     KeyCode::Char('q') => break,
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                    KeyCode::Char('c') if ctrl => break,
                     KeyCode::Tab => state.cycle_focus(),
+                    KeyCode::Char(' ') if ctrl => {
+                        let mut tree = current_tree(state, &mut comparer);
+                        if state.collapsed_paths.is_empty() {
+                            state.collapse_all(&mut tree);
+                        } else {
+                            state.expand_all(&mut tree);
+                        }
+                    }
+                    KeyCode::Char('o') if ctrl => state.toggle_sort_mode(),
+                    KeyCode::Char('b') if ctrl => state.toggle_show_attributes(),
+                    KeyCode::Char('p') if ctrl => state.toggle_wrap_tree(),
+                    KeyCode::Char('f') if ctrl => state.toggle_filter_active(),
+                    KeyCode::Char('e') if ctrl => {
+                        let tree = current_tree(state, &mut comparer);
+                        if let Err(e) = state.extract_selected(&tree) {
+                            tracing::error!("extract failed: {}", e);
+                        }
+                    }
+                    KeyCode::Char('a') if ctrl => match state.focus {
+                        FocusPane::LayerList => {
+                            state.compare_mode = crate::tui::state::CompareMode::Aggregated;
+                        }
+                        FocusPane::FileTree => {
+                            state.toggle_diff_type(crate::analysis::filetree::DiffType::Added);
+                        }
+                    },
+                    KeyCode::Char('l') if ctrl => {
+                        if state.focus == FocusPane::LayerList {
+                            state.compare_mode = crate::tui::state::CompareMode::Natural;
+                        }
+                    }
+                    KeyCode::Char('r') if ctrl => {
+                        if state.focus == FocusPane::FileTree {
+                            state.toggle_diff_type(crate::analysis::filetree::DiffType::Removed);
+                        }
+                    }
+                    KeyCode::Char('m') if ctrl => {
+                        if state.focus == FocusPane::FileTree {
+                            state.toggle_diff_type(crate::analysis::filetree::DiffType::Modified);
+                        }
+                    }
+                    KeyCode::Char('u') if ctrl => {
+                        if state.focus == FocusPane::FileTree {
+                            state.toggle_diff_type(crate::analysis::filetree::DiffType::Unmodified);
+                        }
+                    }
                     KeyCode::Up | KeyCode::Char('k') => match state.focus {
                         FocusPane::LayerList => state.select_prev_layer(),
                         FocusPane::FileTree => {
@@ -55,6 +107,13 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
                         }
                     },
                     KeyCode::Enter | KeyCode::Char(' ') => state.toggle_collapse_selected(),
+                    KeyCode::PageUp | KeyCode::Char('u') => {
+                        state.page_up(page_height(terminal));
+                    }
+                    KeyCode::PageDown | KeyCode::Char('d') => {
+                        let tree = current_tree(state, &mut comparer);
+                        state.page_down(&tree, page_height(terminal));
+                    }
                     _ => {}
                 }
             }
@@ -77,7 +136,7 @@ fn ui(frame: &mut ratatui::Frame, state: &mut AppState, comparer: &mut Comparer)
 
     LayerListWidget::render(frame, content_layout[0], state);
     FileTreeWidget::render(frame, content_layout[1], state, comparer);
-    StatusBarWidget::render(frame, main_layout[1]);
+    StatusBarWidget::render(frame, main_layout[1], state);
 }
 
 fn current_tree(state: &AppState, comparer: &mut Comparer) -> crate::analysis::filetree::FileTree {
@@ -96,4 +155,23 @@ fn current_tree(state: &AppState, comparer: &mut Comparer) -> crate::analysis::f
     tree.set_sort_mode(state.sort_mode);
     state.apply_collapsed_to_tree(&mut tree);
     tree
+}
+
+fn handle_filter_key(state: &mut AppState, key: event::KeyEvent) {
+    match key.code {
+        event::KeyCode::Esc => state.toggle_filter_active(),
+        event::KeyCode::Char(c) => state.push_filter_char(c),
+        event::KeyCode::Backspace => state.pop_filter_char(),
+        event::KeyCode::Enter => {
+            // Keep filter active; user can press Esc or Ctrl+F to close.
+        }
+        _ => {}
+    }
+}
+
+fn page_height<B: Backend>(terminal: &Terminal<B>) -> usize {
+    terminal
+        .size()
+        .map(|s| s.height.saturating_sub(3) as usize)
+        .unwrap_or(10)
 }

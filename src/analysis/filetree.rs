@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum DiffType {
     #[default]
     Unmodified,
@@ -37,6 +37,9 @@ pub struct FileInfo {
     pub entry_type: TarEntryType,
     pub linkname: String,
     pub content_hash: u64,
+    /// Raw file contents, populated for regular files during archive parsing.
+    /// Used by the TUI extract feature.
+    pub content: Vec<u8>,
 }
 
 impl Default for FileInfo {
@@ -49,6 +52,7 @@ impl Default for FileInfo {
             entry_type: TarEntryType::Other,
             linkname: String::new(),
             content_hash: 0,
+            content: Vec::new(),
         }
     }
 }
@@ -266,13 +270,7 @@ impl FileTree {
     /// Render the visible tree with diff-type metadata, returning rows in the
     /// half-open range `[start_row, stop_row)`.
     pub fn render_tree(&self, start_row: usize, stop_row: usize) -> Vec<RenderedLine> {
-        let mut lines = Vec::new();
-        Self::render_node(&self.root, "", true, &mut lines, self.sort_mode);
-        lines
-            .into_iter()
-            .skip(start_row)
-            .take(stop_row - start_row)
-            .collect()
+        self.render_tree_filtered(start_row, stop_row, &HashSet::new(), None, false)
     }
 
     /// Render the visible tree as plain strings.
@@ -283,22 +281,80 @@ impl FileTree {
             .collect()
     }
 
+    /// Render the tree with visibility filtering and optional attributes.
+    pub fn render_tree_filtered(
+        &self,
+        start_row: usize,
+        stop_row: usize,
+        hidden_diff_types: &std::collections::HashSet<DiffType>,
+        filter: Option<&regex::Regex>,
+        show_attributes: bool,
+    ) -> Vec<RenderedLine> {
+        let mut lines = Vec::new();
+        Self::render_node(
+            &self.root,
+            "",
+            true,
+            &mut lines,
+            self.sort_mode,
+            hidden_diff_types,
+            filter,
+            show_attributes,
+        );
+        lines
+            .into_iter()
+            .skip(start_row)
+            .take(stop_row.saturating_sub(start_row))
+            .collect()
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn render_node(
         node: &FileNode,
         prefix: &str,
         is_last: bool,
         lines: &mut Vec<RenderedLine>,
         sort_mode: SortMode,
+        hidden_diff_types: &std::collections::HashSet<DiffType>,
+        filter: Option<&regex::Regex>,
+        show_attributes: bool,
     ) {
-        if node.path.as_os_str() != "/" {
+        let is_root = node.path.as_os_str() == "/";
+        if !is_root && !Self::is_visible(node, hidden_diff_types, filter) {
+            // Still descend into children if not collapsed, because a child may
+            // match even when this node does not.
+            if node.collapsed {
+                return;
+            }
+            let children = Self::sorted_children(&node.children, sort_mode);
+            for child in children.iter() {
+                Self::render_node(
+                    child,
+                    prefix,
+                    false,
+                    lines,
+                    sort_mode,
+                    hidden_diff_types,
+                    filter,
+                    show_attributes,
+                );
+            }
+            return;
+        }
+
+        if !is_root {
             let branch = if is_last { "└── " } else { "├── " };
             let name = node
                 .path
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "/".to_string());
+            let mut text = format!("{}{}{}", prefix, branch, name);
+            if show_attributes {
+                text.push_str(&Self::format_attributes(&node.info));
+            }
             lines.push(RenderedLine {
-                text: format!("{}{}{}", prefix, branch, name),
+                text,
                 diff_type: node.diff_type,
                 path: node.path.to_string_lossy().into_owned(),
             });
@@ -313,8 +369,59 @@ impl FileTree {
 
         for (i, child) in children.iter().enumerate() {
             let is_last_child = i == children.len() - 1;
-            Self::render_node(child, &child_prefix, is_last_child, lines, sort_mode);
+            Self::render_node(
+                child,
+                &child_prefix,
+                is_last_child,
+                lines,
+                sort_mode,
+                hidden_diff_types,
+                filter,
+                show_attributes,
+            );
         }
+    }
+
+    fn format_attributes(info: &FileInfo) -> String {
+        let perms = Self::format_mode(info.mode, info.entry_type);
+        format!("  {} {}:{} {}", perms, info.uid, info.gid, info.size)
+    }
+
+    fn format_mode(mode: u32, entry_type: TarEntryType) -> String {
+        let type_char = match entry_type {
+            TarEntryType::Directory => 'd',
+            TarEntryType::Symlink => 'l',
+            TarEntryType::Hardlink => 'h',
+            _ => '-',
+        };
+        let perms = (0..9).map(|i| {
+            let bit = 8 - i;
+            let set = (mode >> bit) & 1 == 1;
+            match i % 3 {
+                0 => {
+                    if set {
+                        'r'
+                    } else {
+                        '-'
+                    }
+                }
+                1 => {
+                    if set {
+                        'w'
+                    } else {
+                        '-'
+                    }
+                }
+                _ => {
+                    if set {
+                        'x'
+                    } else {
+                        '-'
+                    }
+                }
+            }
+        });
+        std::iter::once(type_char).chain(perms).collect()
     }
 
     fn sorted_children(
@@ -349,6 +456,39 @@ impl FileTree {
         }
     }
 
+    pub fn collapse_all(&mut self) {
+        Self::set_collapsed_recursive(&mut self.root, true);
+    }
+
+    pub fn expand_all(&mut self) {
+        Self::set_collapsed_recursive(&mut self.root, false);
+    }
+
+    /// Return the paths of all directory nodes in the tree.
+    pub fn directory_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        Self::collect_directory_paths(&self.root, &mut paths);
+        paths
+    }
+
+    fn collect_directory_paths(node: &FileNode, paths: &mut Vec<String>) {
+        if node.path.as_os_str() != "/" && !node.children.is_empty() {
+            paths.push(node.path.to_string_lossy().into_owned());
+        }
+        for child in node.children.values() {
+            Self::collect_directory_paths(child, paths);
+        }
+    }
+
+    fn set_collapsed_recursive(node: &mut FileNode, collapsed: bool) {
+        if node.path.as_os_str() != "/" {
+            node.collapsed = collapsed;
+        }
+        for child in node.children.values_mut() {
+            Self::set_collapsed_recursive(child, collapsed);
+        }
+    }
+
     pub fn set_sort_mode(&mut self, mode: SortMode) {
         self.sort_mode = mode;
     }
@@ -365,21 +505,62 @@ impl FileTree {
     /// Return the paths of all visible (non-collapsed) nodes in render order,
     /// excluding the root node.
     pub fn visible_paths(&self) -> Vec<String> {
+        self.visible_paths_filtered(&HashSet::new(), None)
+    }
+
+    /// Return the paths of all visible nodes after applying diff-type and
+    /// regex filters.
+    pub fn visible_paths_filtered(
+        &self,
+        hidden_diff_types: &std::collections::HashSet<DiffType>,
+        filter: Option<&regex::Regex>,
+    ) -> Vec<String> {
         let mut paths = Vec::new();
-        Self::collect_visible_paths(&self.root, &mut paths, self.sort_mode);
+        Self::collect_visible_paths(
+            &self.root,
+            &mut paths,
+            self.sort_mode,
+            hidden_diff_types,
+            filter,
+        );
         paths
     }
 
-    fn collect_visible_paths(node: &FileNode, paths: &mut Vec<String>, sort_mode: SortMode) {
-        if node.path.as_os_str() != "/" {
+    fn collect_visible_paths(
+        node: &FileNode,
+        paths: &mut Vec<String>,
+        sort_mode: SortMode,
+        hidden_diff_types: &std::collections::HashSet<DiffType>,
+        filter: Option<&regex::Regex>,
+    ) {
+        let is_root = node.path.as_os_str() == "/";
+        if !is_root && Self::is_visible(node, hidden_diff_types, filter) {
             paths.push(node.path.to_string_lossy().into_owned());
         }
         if node.collapsed {
             return;
         }
         for child in Self::sorted_children(&node.children, sort_mode) {
-            Self::collect_visible_paths(child, paths, sort_mode);
+            Self::collect_visible_paths(child, paths, sort_mode, hidden_diff_types, filter);
         }
+    }
+
+    /// A node is visible if it is not hidden by diff type and either matches
+    /// the filter or has a descendant that matches. Hidden ancestors are kept
+    /// if they have visible descendants so the tree structure is preserved.
+    fn is_visible(
+        node: &FileNode,
+        hidden_diff_types: &std::collections::HashSet<DiffType>,
+        filter: Option<&regex::Regex>,
+    ) -> bool {
+        let diff_visible = !hidden_diff_types.contains(&node.diff_type);
+        let matches_filter = filter.map_or(true, |re| re.is_match(&node.path.to_string_lossy()));
+        let has_visible_child = node
+            .children
+            .values()
+            .any(|c| Self::is_visible(c, hidden_diff_types, filter));
+
+        has_visible_child || (diff_visible && matches_filter)
     }
 }
 
@@ -594,5 +775,97 @@ mod tests {
         let small_pos = lines.iter().position(|l| l.contains("small")).unwrap();
         assert!(large_pos < medium_pos);
         assert!(medium_pos < small_pos);
+    }
+
+    #[test]
+    fn test_collapse_all_expand_all() {
+        let mut tree = FileTree::new();
+        tree.add_path("dir/a", file_info(1, 1));
+        tree.add_path("dir/b", file_info(1, 2));
+        tree.add_path("dir/sub/c", file_info(1, 3));
+
+        tree.collapse_all();
+        assert!(tree.get_node("dir").unwrap().collapsed);
+        assert!(tree.get_node("dir/sub").unwrap().collapsed);
+        let lines = tree.render_string_tree(0, 100);
+        assert_eq!(lines.len(), 1);
+
+        tree.expand_all();
+        assert!(!tree.get_node("dir").unwrap().collapsed);
+        assert!(!tree.get_node("dir/sub").unwrap().collapsed);
+        let lines = tree.render_string_tree(0, 100);
+        assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn test_directory_paths() {
+        let mut tree = FileTree::new();
+        tree.add_path("dir/a", file_info(1, 1));
+        tree.add_path("dir/sub/b", file_info(1, 2));
+        tree.add_path("file", file_info(1, 3));
+
+        let paths = tree.directory_paths();
+        assert!(paths.contains(&"dir".to_string()));
+        assert!(paths.contains(&"dir/sub".to_string()));
+        assert!(!paths.contains(&"file".to_string()));
+    }
+
+    #[test]
+    fn test_visible_paths_filtered_by_diff_type() {
+        let mut tree = FileTree::new();
+        tree.add_path("added", file_info(1, 1));
+        tree.add_path("unmodified", file_info(1, 2));
+        tree.mark_all(DiffType::Added);
+        tree.get_node_mut("unmodified").unwrap().diff_type = DiffType::Unmodified;
+
+        let mut hidden = HashSet::new();
+        hidden.insert(DiffType::Added);
+        let paths = tree.visible_paths_filtered(&hidden, None);
+        assert!(paths.contains(&"unmodified".to_string()));
+        assert!(!paths.contains(&"added".to_string()));
+    }
+
+    #[test]
+    fn test_visible_paths_filtered_by_regex() {
+        let mut tree = FileTree::new();
+        tree.add_path("bin/bash", file_info(1, 1));
+        tree.add_path("etc/passwd", file_info(1, 2));
+
+        let re = regex::Regex::new("passwd").unwrap();
+        let paths = tree.visible_paths_filtered(&HashSet::new(), Some(&re));
+        assert!(paths.contains(&"etc".to_string()));
+        assert!(paths.contains(&"etc/passwd".to_string()));
+        assert!(!paths.contains(&"bin".to_string()));
+        assert!(!paths.contains(&"bin/bash".to_string()));
+    }
+
+    #[test]
+    fn test_render_tree_filtered_hides_hidden_diff_type() {
+        let mut tree = FileTree::new();
+        tree.add_path("added", file_info(1, 1));
+        tree.mark_all(DiffType::Added);
+
+        let mut hidden = HashSet::new();
+        hidden.insert(DiffType::Added);
+        let lines = tree.render_tree_filtered(0, 100, &hidden, None, false);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_render_tree_show_attributes() {
+        let mut tree = FileTree::new();
+        tree.add_path("file", file_info(100, 1));
+
+        let lines = tree.render_tree_filtered(0, 100, &HashSet::new(), None, true);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].text.contains("100"));
+    }
+
+    #[test]
+    fn test_format_mode() {
+        let perms = FileTree::format_mode(0o644, TarEntryType::Regular);
+        assert_eq!(perms, "-rw-r--r--");
+        let dir_perms = FileTree::format_mode(0o755, TarEntryType::Directory);
+        assert_eq!(dir_perms, "drwxr-xr-x");
     }
 }

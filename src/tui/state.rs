@@ -1,6 +1,10 @@
 #![allow(dead_code)]
 
 use std::collections::HashSet;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use regex::Regex;
 
 use crate::analysis::filetree::{DiffType, FileTree, SortMode};
 use crate::image::Image;
@@ -41,6 +45,8 @@ pub struct AppState {
     pub filter_text: String,
     pub is_filter_active: bool,
     pub selected_tree_path: Option<String>,
+    pub tree_scroll_offset: usize,
+    pub wrap_tree: bool,
 }
 
 impl AppState {
@@ -62,6 +68,8 @@ impl AppState {
             filter_text: String::new(),
             is_filter_active: false,
             selected_tree_path: None,
+            tree_scroll_offset: 0,
+            wrap_tree: false,
         }
     }
 
@@ -104,7 +112,7 @@ impl AppState {
 
     /// Move the file-tree selection to the next visible node.
     pub fn select_next_tree_node(&mut self, tree: &FileTree) {
-        let paths = Self::visible_paths(tree);
+        let paths = self.filtered_visible_paths(tree);
         if paths.is_empty() {
             self.selected_tree_path = None;
             return;
@@ -123,7 +131,7 @@ impl AppState {
 
     /// Move the file-tree selection to the previous visible node.
     pub fn select_prev_tree_node(&mut self, tree: &FileTree) {
-        let paths = Self::visible_paths(tree);
+        let paths = self.filtered_visible_paths(tree);
         if paths.is_empty() {
             self.selected_tree_path = None;
             return;
@@ -164,6 +172,100 @@ impl AppState {
 
     fn visible_paths(tree: &FileTree) -> Vec<String> {
         tree.visible_paths()
+    }
+
+    pub fn filtered_visible_paths(&self, tree: &FileTree) -> Vec<String> {
+        tree.visible_paths_filtered(&self.hidden_diff_types, self.filter_regex().as_ref())
+    }
+
+    pub fn filter_regex(&self) -> Option<Regex> {
+        if self.is_filter_active && !self.filter_text.is_empty() {
+            Regex::new(&self.filter_text).ok()
+        } else {
+            None
+        }
+    }
+
+    pub fn page_down(&mut self, tree: &FileTree, page_height: usize) {
+        let visible = self.filtered_visible_paths(tree);
+        let max_offset = visible.len().saturating_sub(page_height);
+        self.tree_scroll_offset = (self.tree_scroll_offset + page_height).min(max_offset);
+    }
+
+    pub fn page_up(&mut self, page_height: usize) {
+        self.tree_scroll_offset = self.tree_scroll_offset.saturating_sub(page_height);
+    }
+
+    pub fn toggle_sort_mode(&mut self) {
+        self.sort_mode = match self.sort_mode {
+            SortMode::Name => SortMode::Size,
+            SortMode::Size => SortMode::Name,
+        };
+    }
+
+    pub fn toggle_show_attributes(&mut self) {
+        self.show_attributes = !self.show_attributes;
+    }
+
+    pub fn toggle_wrap_tree(&mut self) {
+        self.wrap_tree = !self.wrap_tree;
+    }
+
+    pub fn toggle_diff_type(&mut self, diff_type: DiffType) {
+        if self.hidden_diff_types.contains(&diff_type) {
+            self.hidden_diff_types.remove(&diff_type);
+        } else {
+            self.hidden_diff_types.insert(diff_type);
+        }
+    }
+
+    pub fn toggle_filter_active(&mut self) {
+        self.is_filter_active = !self.is_filter_active;
+        if !self.is_filter_active {
+            self.filter_text.clear();
+        }
+        self.tree_scroll_offset = 0;
+        self.selected_tree_path = None;
+    }
+
+    pub fn push_filter_char(&mut self, c: char) {
+        self.filter_text.push(c);
+        self.tree_scroll_offset = 0;
+    }
+
+    pub fn pop_filter_char(&mut self) {
+        self.filter_text.pop();
+        self.tree_scroll_offset = 0;
+    }
+
+    pub fn collapse_all(&mut self, tree: &mut FileTree) {
+        tree.collapse_all();
+        self.collapsed_paths = tree.directory_paths().into_iter().collect();
+    }
+
+    pub fn expand_all(&mut self, tree: &mut FileTree) {
+        tree.expand_all();
+        self.collapsed_paths.clear();
+    }
+
+    pub fn extract_selected(&self, tree: &FileTree) -> Result<()> {
+        let path = self
+            .selected_tree_path
+            .as_ref()
+            .context("no file selected")?;
+        let node = tree.get_node(path).context("selected node not found")?;
+        anyhow::ensure!(
+            node.info.entry_type == crate::analysis::filetree::TarEntryType::Regular,
+            "selected node is not a regular file"
+        );
+        let filename = Path::new(path)
+            .file_name()
+            .context("invalid path")?
+            .to_string_lossy()
+            .into_owned();
+        std::fs::write(&filename, &node.info.content)
+            .with_context(|| format!("failed to write {}", filename))?;
+        Ok(())
     }
 }
 
@@ -306,5 +408,122 @@ mod tests {
         let mut tree = tree_with_nodes();
         state.apply_collapsed_to_tree(&mut tree);
         assert!(tree.get_node("bin").unwrap().collapsed);
+    }
+
+    #[test]
+    fn test_toggle_sort_mode() {
+        let mut state = AppState::new(empty_image());
+        assert_eq!(state.sort_mode, SortMode::Name);
+        state.toggle_sort_mode();
+        assert_eq!(state.sort_mode, SortMode::Size);
+        state.toggle_sort_mode();
+        assert_eq!(state.sort_mode, SortMode::Name);
+    }
+
+    #[test]
+    fn test_toggle_show_attributes() {
+        let mut state = AppState::new(empty_image());
+        assert!(!state.show_attributes);
+        state.toggle_show_attributes();
+        assert!(state.show_attributes);
+    }
+
+    #[test]
+    fn test_toggle_wrap_tree() {
+        let mut state = AppState::new(empty_image());
+        assert!(!state.wrap_tree);
+        state.toggle_wrap_tree();
+        assert!(state.wrap_tree);
+    }
+
+    #[test]
+    fn test_toggle_diff_type() {
+        let mut state = AppState::new(empty_image());
+        assert!(!state.hidden_diff_types.contains(&DiffType::Added));
+        state.toggle_diff_type(DiffType::Added);
+        assert!(state.hidden_diff_types.contains(&DiffType::Added));
+        state.toggle_diff_type(DiffType::Added);
+        assert!(!state.hidden_diff_types.contains(&DiffType::Added));
+    }
+
+    #[test]
+    fn test_filter_regex() {
+        let mut state = AppState::new(empty_image());
+        assert!(state.filter_regex().is_none());
+        state.is_filter_active = true;
+        state.filter_text = "bin.*".to_string();
+        assert!(state.filter_regex().is_some());
+        state.filter_text = "[".to_string();
+        assert!(state.filter_regex().is_none());
+    }
+
+    #[test]
+    fn test_filter_text_typing() {
+        let mut state = AppState::new(empty_image());
+        state.toggle_filter_active();
+        state.push_filter_char('a');
+        state.push_filter_char('b');
+        assert_eq!(state.filter_text, "ab");
+        state.pop_filter_char();
+        assert_eq!(state.filter_text, "a");
+    }
+
+    #[test]
+    fn test_collapse_expand_all() {
+        let mut state = AppState::new(empty_image());
+        let mut tree = tree_with_nodes();
+        state.collapse_all(&mut tree);
+        assert!(state.collapsed_paths.contains("bin"));
+        assert!(state.collapsed_paths.contains("etc"));
+        state.expand_all(&mut tree);
+        assert!(state.collapsed_paths.is_empty());
+    }
+
+    #[test]
+    fn test_extract_selected_writes_file() {
+        let mut tree = FileTree::new();
+        let mut info = file_info(0, 1);
+        info.content = b"hello world".to_vec();
+        tree.add_path("dir/file.txt", info);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+
+        let mut state = AppState::new(empty_image());
+        state.selected_tree_path = Some("dir/file.txt".to_string());
+        let result = state.extract_selected(&tree);
+
+        std::env::set_current_dir(&original_dir).unwrap();
+        result.unwrap();
+
+        let written = std::fs::read(temp_dir.path().join("file.txt")).unwrap();
+        assert_eq!(written, b"hello world");
+    }
+
+    #[test]
+    fn test_extract_selected_requires_regular_file() {
+        let mut tree = FileTree::new();
+        tree.add_path("dir", dir_info());
+
+        let mut state = AppState::new(empty_image());
+        state.selected_tree_path = Some("dir".to_string());
+        assert!(state.extract_selected(&tree).is_err());
+    }
+
+    fn file_info(size: u64, content_hash: u64) -> FileInfo {
+        FileInfo {
+            size,
+            content_hash,
+            entry_type: TarEntryType::Regular,
+            ..Default::default()
+        }
+    }
+
+    fn dir_info() -> FileInfo {
+        FileInfo {
+            entry_type: TarEntryType::Directory,
+            ..Default::default()
+        }
     }
 }

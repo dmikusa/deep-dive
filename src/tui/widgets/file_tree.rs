@@ -3,7 +3,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::analysis::comparer::Comparer;
@@ -14,10 +14,19 @@ pub struct FileTreeWidget;
 
 impl FileTreeWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState, comparer: &mut Comparer) {
-        let title = match state.focus {
-            FocusPane::FileTree => "File Tree [*]",
-            FocusPane::LayerList => "File Tree",
+        let mut title = match state.focus {
+            FocusPane::FileTree => "File Tree [*]".to_string(),
+            FocusPane::LayerList => "File Tree".to_string(),
         };
+        if state.show_attributes {
+            title.push_str(" [attrs]");
+        }
+        if state.wrap_tree {
+            title.push_str(" [wrap]");
+        }
+        if state.is_filter_active {
+            title.push_str(&format!(" [filter: {}]", state.filter_text));
+        }
 
         let (bs, bstop, ts, tstop) = match state.compare_mode {
             CompareMode::Natural => {
@@ -35,8 +44,23 @@ impl FileTreeWidget {
         tree.set_sort_mode(state.sort_mode);
         state.apply_collapsed_to_tree(&mut tree);
 
-        let height = area.height as usize;
-        let lines = tree.render_tree(0, height);
+        let height = area.height.saturating_sub(2) as usize; // account for borders
+        let lines = tree.render_tree_filtered(
+            state.tree_scroll_offset,
+            state.tree_scroll_offset + height,
+            &state.hidden_diff_types,
+            state.filter_regex().as_ref(),
+            state.show_attributes,
+        );
+
+        // Keep the selected path visible inside the viewport.
+        if let Some(selected) = &state.selected_tree_path {
+            if let Some(pos) = lines.iter().position(|l| &l.path == selected) {
+                if pos >= height {
+                    state.tree_scroll_offset += pos - height + 1;
+                }
+            }
+        }
 
         let text_lines: Vec<Line> = lines
             .into_iter()
@@ -60,8 +84,13 @@ impl FileTreeWidget {
             })
             .collect();
 
-        let paragraph =
-            Paragraph::new(Text::from(text_lines)).block(Block::bordered().title(title));
+        let paragraph = if state.wrap_tree {
+            Paragraph::new(Text::from(text_lines))
+                .block(Block::bordered().title(title))
+                .wrap(Wrap { trim: false })
+        } else {
+            Paragraph::new(Text::from(text_lines)).block(Block::bordered().title(title))
+        };
         frame.render_widget(paragraph, area);
     }
 

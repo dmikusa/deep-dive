@@ -28,6 +28,7 @@ pub struct TarEntry {
     pub entry_type: TarEntryType,
     pub linkname: String,
     pub content_hash: u64,
+    pub content: Vec<u8>,
 }
 
 #[derive(Deserialize)]
@@ -108,6 +109,7 @@ fn build_layers(
                 entry_type: te.entry_type,
                 linkname: te.linkname.clone(),
                 content_hash: te.content_hash,
+                content: te.content.clone(),
             };
             tree.add_path(&te.path, info);
             if te.entry_type == TarEntryType::Regular {
@@ -346,11 +348,11 @@ pub fn parse_tar_entries(reader: impl Read) -> Result<Vec<TarEntry>> {
             .map(|l| l.to_string_lossy().into_owned())
             .unwrap_or_default();
 
+        let mut content = Vec::new();
         let mut content_hash = 0u64;
         if entry_type == TarEntryType::Regular {
-            let mut data = Vec::new();
-            entry.read_to_end(&mut data)?;
-            content_hash = compute_content_hash(&data);
+            entry.read_to_end(&mut content)?;
+            content_hash = compute_content_hash(&content);
         }
 
         entries.push(TarEntry {
@@ -362,6 +364,7 @@ pub fn parse_tar_entries(reader: impl Read) -> Result<Vec<TarEntry>> {
             entry_type,
             linkname,
             content_hash,
+            content,
         });
     }
 
