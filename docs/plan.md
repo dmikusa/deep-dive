@@ -1404,7 +1404,6 @@ depending on the dive source directory.
 | `test-docker-image.tar` | Primary: 14 layers, whiteouts, mixed file types |
 | `test-gzip-image.tar` | Single layer, gzip compressed |
 | `test-uncompressed-image.tar` | Single layer, no compression |
-| `test-zstd-image.tar` | Single layer, zstd (Phase 6) |
 | `test-oci-gzip-image.tar` | OCI format, gzip (Phase 6) |
 | `test-oci-zstd-image.tar` | OCI format, zstd (Phase 6) |
 
