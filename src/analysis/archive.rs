@@ -81,33 +81,10 @@ struct OciDescriptor {
     digest: String,
 }
 
-pub fn parse_docker_save_tar(reader: impl Read) -> Result<Image> {
-    let mut archive = tar::Archive::new(reader);
-    let mut entries: HashMap<String, Vec<u8>> = HashMap::new();
-
-    for entry in archive.entries()? {
-        let mut entry = entry?;
-        let path = entry.path()?.to_string_lossy().into_owned();
-        let mut data = Vec::new();
-        entry.read_to_end(&mut data)?;
-        entries.insert(path, data);
-    }
-
-    let manifest_data = entries
-        .get("manifest.json")
-        .context("manifest.json not found in archive")?;
-    let manifests: Vec<DockerManifest> =
-        serde_json::from_slice(manifest_data).context("failed to parse manifest.json")?;
-    let manifest = manifests
-        .first()
-        .context("no manifest found in manifest.json")?;
-
-    let config_data = entries
-        .get(&manifest.config)
-        .with_context(|| format!("config file {} not found", manifest.config))?;
-    let config: ImageConfig =
-        serde_json::from_slice(config_data).context("failed to parse image config")?;
-
+fn build_layers(
+    config: &ImageConfig,
+    layer_data_iter: impl Iterator<Item = Result<Vec<u8>>>,
+) -> Result<Vec<Layer>> {
     let non_empty_history: Vec<&HistoryEntry> = config
         .history
         .iter()
@@ -115,95 +92,8 @@ pub fn parse_docker_save_tar(reader: impl Read) -> Result<Image> {
         .collect();
 
     let mut layers = Vec::new();
-    for (i, layer_path) in manifest.layers.iter().enumerate() {
-        let layer_data = entries
-            .get(layer_path)
-            .with_context(|| format!("layer {} not found", layer_path))?;
-
-        let decompressed = decompress_to_vec(layer_data)?;
-        let tar_entries = parse_tar_entries(decompressed.as_slice())?;
-
-        let mut tree = FileTree::new();
-        let mut size = 0u64;
-        for te in &tar_entries {
-            let info = FileInfo {
-                size: te.size,
-                mode: te.mode,
-                uid: te.uid,
-                gid: te.gid,
-                entry_type: te.entry_type,
-                linkname: te.linkname.clone(),
-                content_hash: te.content_hash,
-            };
-            tree.add_path(&te.path, info);
-            if te.entry_type == TarEntryType::Regular {
-                size += te.size;
-            }
-        }
-
-        let command = non_empty_history
-            .get(i)
-            .and_then(|h| h.created_by.as_deref().map(strip_command_prefix))
-            .unwrap_or_default();
-
-        layers.push(Layer {
-            index: i,
-            command,
-            size,
-            tree,
-        });
-    }
-
-    let reference = manifest.repo_tags.first().cloned().unwrap_or_default();
-
-    Ok(Image { reference, layers })
-}
-
-pub fn parse_oci_layout(path: &Path) -> Result<Image> {
-    let oci_layout_data =
-        fs::read_to_string(path.join("oci-layout")).context("failed to read oci-layout")?;
-    let oci_layout: OciLayout =
-        serde_json::from_str(&oci_layout_data).context("failed to parse oci-layout")?;
-    if oci_layout.image_layout_version != "1.0.0" {
-        bail!(
-            "unsupported OCI layout version: {}",
-            oci_layout.image_layout_version
-        );
-    }
-
-    let index_data =
-        fs::read_to_string(path.join("index.json")).context("failed to read index.json")?;
-    let index: OciIndex =
-        serde_json::from_str(&index_data).context("failed to parse index.json")?;
-    let manifest_desc = index
-        .manifests
-        .first()
-        .context("no manifests found in index.json")?;
-
-    let manifest_hash = digest_to_hex(&manifest_desc.digest)?;
-    let manifest_data = fs::read(path.join("blobs/sha256").join(&manifest_hash))
-        .context("failed to read manifest blob")?;
-    let manifest: OciManifest =
-        serde_json::from_slice(&manifest_data).context("failed to parse manifest blob")?;
-
-    let config_hash = digest_to_hex(&manifest.config.digest)?;
-    let config_data = fs::read(path.join("blobs/sha256").join(&config_hash))
-        .context("failed to read config blob")?;
-    let config: ImageConfig =
-        serde_json::from_slice(&config_data).context("failed to parse config blob")?;
-
-    let non_empty_history: Vec<&HistoryEntry> = config
-        .history
-        .iter()
-        .filter(|h| !h.empty_layer.unwrap_or(false))
-        .collect();
-
-    let mut layers = Vec::new();
-    for (i, layer_desc) in manifest.layers.iter().enumerate() {
-        let layer_hash = digest_to_hex(&layer_desc.digest)?;
-        let layer_data = fs::read(path.join("blobs/sha256").join(&layer_hash))
-            .with_context(|| format!("failed to read layer blob {}", layer_desc.digest))?;
-
+    for (i, layer_data) in layer_data_iter.enumerate() {
+        let layer_data = layer_data?;
         let decompressed = decompress_to_vec(&layer_data)?;
         let tar_entries = parse_tar_entries(decompressed.as_slice())?;
 
@@ -238,10 +128,162 @@ pub fn parse_oci_layout(path: &Path) -> Result<Image> {
         });
     }
 
+    Ok(layers)
+}
+
+pub fn parse_docker_save_tar(reader: impl Read) -> Result<Image> {
+    let mut archive = tar::Archive::new(reader);
+    let mut entries: HashMap<String, Vec<u8>> = HashMap::new();
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.to_string_lossy().into_owned();
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data)?;
+        entries.insert(path, data);
+    }
+
+    let manifest_data = entries
+        .get("manifest.json")
+        .context("manifest.json not found in archive")?;
+    let manifests: Vec<DockerManifest> =
+        serde_json::from_slice(manifest_data).context("failed to parse manifest.json")?;
+    let manifest = manifests
+        .first()
+        .context("no manifest found in manifest.json")?;
+
+    let config_data = entries
+        .get(&manifest.config)
+        .with_context(|| format!("config file {} not found", manifest.config))?;
+    let config: ImageConfig =
+        serde_json::from_slice(config_data).context("failed to parse image config")?;
+
+    let layers = build_layers(
+        &config,
+        manifest.layers.iter().map(|layer_path| {
+            entries
+                .get(layer_path)
+                .cloned()
+                .with_context(|| format!("layer {} not found", layer_path))
+        }),
+    )?;
+
+    let reference = manifest.repo_tags.first().cloned().unwrap_or_default();
+
+    Ok(Image { reference, layers })
+}
+
+pub fn parse_oci_layout(path: &Path) -> Result<Image> {
+    let mut entries: HashMap<String, Vec<u8>> = HashMap::new();
+
+    let oci_layout_data =
+        fs::read_to_string(path.join("oci-layout")).context("failed to read oci-layout")?;
+    entries.insert("oci-layout".into(), oci_layout_data.into_bytes());
+
+    let index_data =
+        fs::read_to_string(path.join("index.json")).context("failed to read index.json")?;
+    entries.insert("index.json".into(), index_data.into_bytes());
+
+    collect_files(path, path, &mut entries)?;
+
+    parse_oci_layout_entries(entries)
+}
+
+fn collect_files(
+    base: &Path,
+    current: &Path,
+    entries: &mut HashMap<String, Vec<u8>>,
+) -> Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(base, &path, entries)?;
+        } else if path.is_file() {
+            let relative = path
+                .strip_prefix(base)
+                .map_err(|e| anyhow::anyhow!("failed to strip prefix: {}", e))?
+                .to_string_lossy()
+                .into_owned();
+            let data =
+                fs::read(&path).with_context(|| format!("failed to read file {}", relative))?;
+            entries.insert(relative, data);
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_oci_layout_entries(entries: HashMap<String, Vec<u8>>) -> Result<Image> {
+    let oci_layout_data = entries
+        .get("oci-layout")
+        .context("oci-layout not found in archive")?;
+    let oci_layout: OciLayout =
+        serde_json::from_slice(oci_layout_data).context("failed to parse oci-layout")?;
+    if oci_layout.image_layout_version != "1.0.0" {
+        bail!(
+            "unsupported OCI layout version: {}",
+            oci_layout.image_layout_version
+        );
+    }
+
+    let index_data = entries
+        .get("index.json")
+        .context("index.json not found in archive")?;
+    let index: OciIndex =
+        serde_json::from_slice(index_data).context("failed to parse index.json")?;
+    let manifest_desc = index
+        .manifests
+        .first()
+        .context("no manifests found in index.json")?;
+
+    let manifest_hash = digest_to_hex(&manifest_desc.digest)?;
+    let manifest_data = entries
+        .get(&format!("blobs/sha256/{}", manifest_hash))
+        .context("failed to read manifest blob")?;
+    let manifest: OciManifest =
+        serde_json::from_slice(manifest_data).context("failed to parse manifest blob")?;
+
+    let config_hash = digest_to_hex(&manifest.config.digest)?;
+    let config_data = entries
+        .get(&format!("blobs/sha256/{}", config_hash))
+        .context("failed to read config blob")?;
+    let config: ImageConfig =
+        serde_json::from_slice(config_data).context("failed to parse config blob")?;
+
+    let layers = build_layers(
+        &config,
+        manifest.layers.iter().map(|layer_desc| {
+            let layer_hash = digest_to_hex(&layer_desc.digest)?;
+            entries
+                .get(&format!("blobs/sha256/{}", layer_hash))
+                .cloned()
+                .with_context(|| format!("failed to read layer blob {}", layer_desc.digest))
+        }),
+    )?;
+
     Ok(Image {
         reference: String::new(),
         layers,
     })
+}
+
+pub fn parse_oci_archive_tar(reader: impl Read) -> Result<Image> {
+    let mut archive = tar::Archive::new(reader);
+    let mut entries: HashMap<String, Vec<u8>> = HashMap::new();
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = normalize_path(&entry.path()?.to_string_lossy());
+        if path.is_empty() {
+            continue;
+        }
+        let mut data = Vec::new();
+        entry.read_to_end(&mut data)?;
+        entries.insert(path, data);
+    }
+
+    parse_oci_layout_entries(entries)
 }
 
 pub fn detect_compression(data: &[u8]) -> CompressionType {
@@ -520,6 +562,42 @@ mod tests {
         let mut reader = decompress_layer(Cursor::new(data)).unwrap();
         reader.read_to_end(&mut output).unwrap();
         assert_eq!(output, b"hello world uncompressed");
+    }
+
+    #[test]
+    fn test_parse_oci_archive_tar_gzip() {
+        let file = File::open("tests/fixtures/test-oci-gzip-image.tar").unwrap();
+        let image = parse_oci_archive_tar(file).unwrap();
+
+        assert_eq!(image.layers.len(), 1);
+        assert!(!image.layers[0].command.is_empty());
+        assert!(image.layers[0].tree.root.children.len() > 0);
+    }
+
+    #[test]
+    fn test_parse_oci_archive_tar_zstd() {
+        let file = File::open("tests/fixtures/test-oci-zstd-image.tar").unwrap();
+        let image = parse_oci_archive_tar(file).unwrap();
+
+        assert_eq!(image.layers.len(), 1);
+        assert!(!image.layers[0].command.is_empty());
+        assert!(image.layers[0].tree.root.children.len() > 0);
+    }
+
+    #[test]
+    fn test_decompress_layer_zstd() {
+        let original = b"hello world this is a zstd test";
+        let mut compressed = Vec::new();
+        {
+            let mut encoder = zstd::stream::write::Encoder::new(&mut compressed, 0).unwrap();
+            encoder.write_all(original).unwrap();
+            encoder.finish().unwrap();
+        }
+
+        let mut decompressed = Vec::new();
+        let mut reader = decompress_layer(Cursor::new(compressed)).unwrap();
+        reader.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(decompressed, original);
     }
 
     fn extract_oci_fixture(tar_name: &str) -> tempfile::TempDir {
