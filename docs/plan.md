@@ -943,6 +943,15 @@ Add:
 - `Esc` exits filter mode
 - Visual indicator when filter is active
 
+**Implementation notes / future optimization**:
+- The `Ctrl+E` extract feature stores raw file contents in `FileInfo.content`
+  during archive parsing. This makes extraction simple but significantly
+  increases memory use and clone cost when the `Comparer` stacks and caches
+  trees. This is acceptable for Phase 7, but should be revisited before
+  performance testing large images. Options include: storing only hashes in
+  the stacked tree and keeping content in the original layer trees, or
+  streaming file contents from the source on demand.
+
 ---
 
 ### Phase 8: Analyzer Framework + Efficiency Analyzer
