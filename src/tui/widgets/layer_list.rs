@@ -6,16 +6,20 @@ use ratatui::text::Text;
 use ratatui::widgets::{Block, List, ListItem, ListState};
 use ratatui::Frame;
 
-use crate::tui::state::{AppState, FocusPane};
+use crate::tui::state::{AppState, CompareMode, FocusPane};
 use crate::utils::format_size;
 
 pub struct LayerListWidget;
 
 impl LayerListWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
+        let mode_label = match state.compare_mode {
+            CompareMode::Natural => "layer",
+            CompareMode::Aggregated => "all",
+        };
         let title = match state.focus {
-            FocusPane::LayerList => "Layers [*]",
-            FocusPane::FileTree => "Layers",
+            FocusPane::LayerList => format!("Layers [{}] [*]", mode_label),
+            FocusPane::FileTree => format!("Layers [{}]", mode_label),
         };
 
         let items: Vec<ListItem> = state

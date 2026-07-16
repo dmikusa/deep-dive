@@ -1115,6 +1115,46 @@ block-beta
 
 ---
 
+### Phase 9.5: Extract-to Popup and Config Defaults
+
+**Goal**: Improve the `Ctrl+E` extract workflow with a destination prompt and
+configurable default directory.
+
+**Motivation**: The Phase 7 extract writes files to the current working
+directory with no feedback. Users need confirmation of success/failure and a
+way to avoid collisions / choose where files go.
+
+**Files to create/modify**:
+- `src/tui/state.rs` — add `Modal` state for extract-to popup
+- `src/tui/widgets/modal.rs` — NEW: centered input modal widget
+- `src/tui/app.rs` — route keys to modal when active, confirm with Enter,
+  cancel with Esc
+- `src/config.rs` — load `extract.default-directory` from config
+- `src/tui/widgets/status_bar.rs` — show extract result messages
+
+**Behavior**:
+1. `Ctrl+E` on a regular file opens an "Extract to:" modal pre-filled with:
+   - the configured `extract.default-directory` if set, or
+   - the current working directory.
+2. The user can edit the destination path (file or directory).
+   - If the path ends with `/` or exists as a directory, extract inside it
+     preserving the image's relative path.
+   - Otherwise, treat it as the exact output file path.
+3. `Enter` confirms, `Esc` cancels.
+4. A status message confirms success or shows the error.
+5. Config option:
+   ```yaml
+   extract:
+     default-directory: "~/Downloads/deep-dive-extracts"
+   ```
+
+**Tests**:
+- Modal state transitions: open, type, confirm, cancel
+- Path resolution logic (directory vs file target)
+- Config parsing with and without `extract.default-directory`
+
+---
+
 ### Phase 10: OCI Registry Resolver
 
 **Goal**: `deep-dive registry://alpine:latest` pulls directly from registry.

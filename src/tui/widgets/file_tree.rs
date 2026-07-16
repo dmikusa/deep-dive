@@ -14,9 +14,13 @@ pub struct FileTreeWidget;
 
 impl FileTreeWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState, comparer: &mut Comparer) {
+        let mode_label = match state.compare_mode {
+            CompareMode::Natural => "layer",
+            CompareMode::Aggregated => "all",
+        };
         let mut title = match state.focus {
-            FocusPane::FileTree => "File Tree [*]".to_string(),
-            FocusPane::LayerList => "File Tree".to_string(),
+            FocusPane::FileTree => format!("File Tree [{}] [*]", mode_label),
+            FocusPane::LayerList => format!("File Tree [{}]", mode_label),
         };
         if state.show_attributes {
             title.push_str(" [attrs]");
