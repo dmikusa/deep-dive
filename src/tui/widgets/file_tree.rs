@@ -45,6 +45,13 @@ impl FileTreeWidget {
         state.apply_collapsed_to_tree(&mut tree);
 
         let height = area.height.saturating_sub(2) as usize; // account for borders
+        let total_rows = tree.visible_paths_filtered(
+            &state.hidden_diff_types,
+            state.filter_regex().as_ref(),
+        ).len();
+        let max_offset = total_rows.saturating_sub(height);
+        state.tree_scroll_offset = state.tree_scroll_offset.min(max_offset);
+
         let lines = tree.render_tree_filtered(
             state.tree_scroll_offset,
             state.tree_scroll_offset + height,
@@ -151,5 +158,56 @@ mod tests {
         let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(content.contains("bin"));
         assert!(content.contains("bash"));
+    }
+
+    #[test]
+    fn test_file_tree_filter_works_regardless_of_focus() {
+        let mut tree = FileTree::new();
+        tree.add_path(
+            "bin/bash",
+            FileInfo {
+                entry_type: TarEntryType::Regular,
+                size: 100,
+                content_hash: 1,
+                ..Default::default()
+            },
+        );
+        tree.add_path(
+            "etc/passwd",
+            FileInfo {
+                entry_type: TarEntryType::Regular,
+                size: 10,
+                content_hash: 2,
+                ..Default::default()
+            },
+        );
+        tree.mark_all(DiffType::Added);
+
+        let image = Image {
+            reference: "test".into(),
+            layers: vec![Layer {
+                index: 0,
+                command: "ADD files".into(),
+                size: 110,
+                tree,
+            }],
+        };
+
+        let mut state = AppState::new(image);
+        state.focus = FocusPane::LayerList;
+        state.is_filter_active = true;
+        state.filter_text = "bash".to_string();
+        let mut comparer = Comparer::new(state.image.layers.clone());
+        let backend = TestBackend::new(40, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| FileTreeWidget::render(f, f.area(), &mut state, &mut comparer))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(content.contains("bash"));
+        assert!(!content.contains("passwd"));
     }
 }

@@ -93,6 +93,7 @@ impl AppState {
         if self.selected_layer + 1 < self.image.layers.len() {
             self.selected_layer += 1;
             self.selected_tree_path = None;
+            self.tree_scroll_offset = 0;
         }
     }
 
@@ -100,6 +101,7 @@ impl AppState {
         if self.selected_layer > 0 {
             self.selected_layer -= 1;
             self.selected_tree_path = None;
+            self.tree_scroll_offset = 0;
         }
     }
 
@@ -227,6 +229,7 @@ impl AppState {
         self.tree_scroll_offset = 0;
         self.selected_tree_path = None;
     }
+
 
     pub fn push_filter_char(&mut self, c: char) {
         self.filter_text.push(c);
