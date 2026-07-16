@@ -12,7 +12,9 @@ pub struct StatusBarWidget;
 
 impl StatusBarWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
-        let text = if state.is_filter_active {
+        let text = if let Some(msg) = &state.status_message {
+            msg.clone()
+        } else if state.is_filter_active {
             "Filter: type pattern, Esc close".to_string()
         } else {
             match state.focus {

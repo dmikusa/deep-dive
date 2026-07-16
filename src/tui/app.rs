@@ -41,6 +41,8 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
                     continue;
                 }
 
+                state.clear_status_message();
+
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
                     KeyCode::Char('q') => break,
@@ -61,7 +63,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
                     KeyCode::Char('e') if ctrl => {
                         let tree = current_tree(state, &mut comparer);
                         if let Err(e) = state.extract_selected(&tree) {
-                            tracing::error!("extract failed: {}", e);
+                            state.status_message = Some(format!("Extract failed: {}", e));
                         }
                     }
                     KeyCode::Char('a') if ctrl => match state.focus {

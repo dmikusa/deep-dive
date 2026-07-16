@@ -47,6 +47,7 @@ pub struct AppState {
     pub selected_tree_path: Option<String>,
     pub tree_scroll_offset: usize,
     pub wrap_tree: bool,
+    pub status_message: Option<String>,
 }
 
 impl AppState {
@@ -70,6 +71,7 @@ impl AppState {
             selected_tree_path: None,
             tree_scroll_offset: 0,
             wrap_tree: false,
+            status_message: None,
         }
     }
 
@@ -250,28 +252,35 @@ impl AppState {
         self.collapsed_paths.clear();
     }
 
-    pub fn extract_selected(&self, tree: &FileTree) -> Result<()> {
+    pub fn extract_selected(&mut self, tree: &FileTree) -> Result<()> {
         let path = self
             .selected_tree_path
             .as_ref()
             .context("no file selected")?;
         let node = tree.get_node(path).context("selected node not found")?;
-        let filename = Path::new(path)
-            .file_name()
-            .context("invalid path")?
-            .to_string_lossy()
-            .into_owned();
 
         match node.info.entry_type {
             crate::analysis::filetree::TarEntryType::Regular => {
-                std::fs::write(&filename, &node.info.content)
-                    .with_context(|| format!("failed to write {}", filename))?;
+                let target = Path::new(path);
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)
+                        .with_context(|| format!("failed to create directory {:?}", parent))?;
+                }
+                std::fs::write(target, &node.info.content)
+                    .with_context(|| format!("failed to write {}", path))?;
+                self.status_message = Some(format!("Extracted {}", path));
             }
             crate::analysis::filetree::TarEntryType::Symlink => {
+                let target = Path::new(path);
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent)
+                        .with_context(|| format!("failed to create directory {:?}", parent))?;
+                }
                 #[cfg(unix)]
                 {
-                    std::os::unix::fs::symlink(&node.info.linkname, &filename)
-                        .with_context(|| format!("failed to create symlink {}", filename))?;
+                    std::os::unix::fs::symlink(&node.info.linkname, target)
+                        .with_context(|| format!("failed to create symlink {}", path))?;
+                    self.status_message = Some(format!("Extracted symlink {}", path));
                 }
                 #[cfg(not(unix))]
                 {
@@ -279,8 +288,7 @@ impl AppState {
                 }
             }
             crate::analysis::filetree::TarEntryType::Hardlink => {
-                std::fs::write(&filename, &node.info.content)
-                    .with_context(|| format!("failed to write {}", filename))?;
+                anyhow::bail!("cannot extract {}: hardlinks are not supported yet", path);
             }
             other => {
                 anyhow::bail!(
@@ -292,6 +300,10 @@ impl AppState {
         }
 
         Ok(())
+    }
+
+    pub fn clear_status_message(&mut self) {
+        self.status_message = None;
     }
 }
 
@@ -523,7 +535,7 @@ mod tests {
         std::env::set_current_dir(&original_dir).unwrap();
         result.unwrap();
 
-        let written = std::fs::read(temp_dir.path().join("file.txt")).unwrap();
+        let written = std::fs::read(temp_dir.path().join("dir/file.txt")).unwrap();
         assert_eq!(written, b"hello world");
     }
 
