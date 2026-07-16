@@ -230,7 +230,6 @@ impl AppState {
         self.selected_tree_path = None;
     }
 
-
     pub fn push_filter_char(&mut self, c: char) {
         self.filter_text.push(c);
         self.tree_scroll_offset = 0;
@@ -257,17 +256,41 @@ impl AppState {
             .as_ref()
             .context("no file selected")?;
         let node = tree.get_node(path).context("selected node not found")?;
-        anyhow::ensure!(
-            node.info.entry_type == crate::analysis::filetree::TarEntryType::Regular,
-            "selected node is not a regular file"
-        );
         let filename = Path::new(path)
             .file_name()
             .context("invalid path")?
             .to_string_lossy()
             .into_owned();
-        std::fs::write(&filename, &node.info.content)
-            .with_context(|| format!("failed to write {}", filename))?;
+
+        match node.info.entry_type {
+            crate::analysis::filetree::TarEntryType::Regular => {
+                std::fs::write(&filename, &node.info.content)
+                    .with_context(|| format!("failed to write {}", filename))?;
+            }
+            crate::analysis::filetree::TarEntryType::Symlink => {
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(&node.info.linkname, &filename)
+                        .with_context(|| format!("failed to create symlink {}", filename))?;
+                }
+                #[cfg(not(unix))]
+                {
+                    anyhow::bail!("symlink extraction is not supported on this platform");
+                }
+            }
+            crate::analysis::filetree::TarEntryType::Hardlink => {
+                std::fs::write(&filename, &node.info.content)
+                    .with_context(|| format!("failed to write {}", filename))?;
+            }
+            other => {
+                anyhow::bail!(
+                    "cannot extract {}: selected node is a {} (not a regular file)",
+                    path,
+                    format!("{:?}", other).to_lowercase()
+                );
+            }
+        }
+
         Ok(())
     }
 }

@@ -45,10 +45,9 @@ impl FileTreeWidget {
         state.apply_collapsed_to_tree(&mut tree);
 
         let height = area.height.saturating_sub(2) as usize; // account for borders
-        let total_rows = tree.visible_paths_filtered(
-            &state.hidden_diff_types,
-            state.filter_regex().as_ref(),
-        ).len();
+        let total_rows = tree
+            .visible_paths_filtered(&state.hidden_diff_types, state.filter_regex().as_ref())
+            .len();
         let max_offset = total_rows.saturating_sub(height);
         state.tree_scroll_offset = state.tree_scroll_offset.min(max_offset);
 

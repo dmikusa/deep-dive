@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
@@ -47,11 +49,29 @@ fn init_tracing(args: &Cli) {
         _ => "trace",
     };
 
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)),
-        )
-        .try_init();
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("deep-dive.log");
+
+    if let Ok(file) = log_file {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)),
+            )
+            .with_writer(move || {
+                file.try_clone()
+                    .map(|f| Box::new(f) as Box<dyn std::io::Write + Send>)
+                    .unwrap_or_else(|_| Box::new(std::io::sink()))
+            })
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(filter)),
+            )
+            .try_init();
+    }
 }
 
 async fn resolve_image(uri: &str) -> anyhow::Result<Image> {
