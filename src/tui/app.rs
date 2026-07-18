@@ -9,15 +9,18 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Terminal;
 
 use crate::analysis::comparer::Comparer;
+use crate::analysis::report::Report;
 use crate::image::Image;
 use crate::tui::state::{AppState, FocusPane};
 use crate::tui::widgets::file_tree::FileTreeWidget;
+use crate::tui::widgets::image_details::ImageDetailsWidget;
 use crate::tui::widgets::layer_list::LayerListWidget;
 use crate::tui::widgets::status_bar::StatusBarWidget;
 
-pub async fn run(image: Image) -> Result<()> {
+pub async fn run(image: Image, report: Report) -> Result<()> {
     let mut terminal = ratatui::init();
     let mut state = AppState::new(image);
+    state.report = Some(report);
     let result = run_app(&mut terminal, &mut state).await;
     ratatui::restore();
     result
@@ -136,7 +139,13 @@ fn ui(frame: &mut ratatui::Frame, state: &mut AppState, comparer: &mut Comparer)
         .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
         .split(main_layout[0]);
 
-    LayerListWidget::render(frame, content_layout[0], state);
+    let left_column = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .split(content_layout[0]);
+
+    LayerListWidget::render(frame, left_column[0], state);
+    ImageDetailsWidget::render(frame, left_column[1], state);
     FileTreeWidget::render(frame, content_layout[1], state, comparer);
     StatusBarWidget::render(frame, main_layout[1], state);
 }

@@ -10,6 +10,8 @@ mod image;
 mod tui;
 mod utils;
 
+use analysis::analyzers::efficiency::EfficiencyAnalyzer;
+use analysis::report::{Analyzer, Report};
 use cli::Cli;
 use image::docker::archive::DockerArchiveResolver;
 use image::docker::engine::DockerEngineResolver;
@@ -33,7 +35,10 @@ async fn main() -> anyhow::Result<()> {
         result
     }?;
 
-    tui::app::run(image).await
+    let analyzers: Vec<Box<dyn Analyzer>> = vec![Box::new(EfficiencyAnalyzer)];
+    let report = Report::generate(&image, &analyzers)?;
+
+    tui::app::run(image, report).await
 }
 
 fn is_docker_uri(uri: &str) -> bool {

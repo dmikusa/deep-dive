@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use regex::Regex;
 
 use crate::analysis::filetree::{DiffType, FileTree, SortMode};
+use crate::analysis::report::Report;
 use crate::image::Image;
 
 /// Display data for a single layer in the layer list.
@@ -32,7 +33,7 @@ pub enum CompareMode {
 }
 
 /// Mutable application state for the TUI.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AppState {
     pub image: Image,
     pub selected_layer: usize,
@@ -48,6 +49,7 @@ pub struct AppState {
     pub tree_scroll_offset: usize,
     pub wrap_tree: bool,
     pub status_message: Option<String>,
+    pub report: Option<Report>,
 }
 
 impl AppState {
@@ -72,6 +74,7 @@ impl AppState {
             tree_scroll_offset: 0,
             wrap_tree: false,
             status_message: None,
+            report: None,
         }
     }
 

@@ -480,6 +480,70 @@ impl FileTree {
         }
     }
 
+    /// Return the paths of all leaf nodes in the tree.
+    pub fn leaf_paths(&self) -> Vec<String> {
+        let mut paths = Vec::new();
+        Self::collect_leaf_paths(&self.root, &mut paths);
+        paths
+    }
+
+    fn collect_leaf_paths(node: &FileNode, paths: &mut Vec<String>) {
+        if node.path.as_os_str() != "/" && node.children.is_empty() {
+            paths.push(node.path.to_string_lossy().into_owned());
+        }
+        for child in node.children.values() {
+            Self::collect_leaf_paths(child, paths);
+        }
+    }
+
+    /// Return the total size of a node and all of its descendants.
+    pub fn subtree_size(&self, path: &str) -> u64 {
+        if let Some(node) = self.get_node(path) {
+            Self::node_subtree_size(node)
+        } else {
+            0
+        }
+    }
+
+    fn node_subtree_size(node: &FileNode) -> u64 {
+        let mut size = node.info.size;
+        for child in node.children.values() {
+            size += Self::node_subtree_size(child);
+        }
+        size
+    }
+
+    /// Return the path that a whiteout node deletes, or `None` if the node
+    /// is not a whiteout marker.
+    pub fn whiteout_target_path(path: &str) -> Option<String> {
+        let p = PathBuf::from(path);
+        let name = p.file_name().and_then(|n| n.to_str())?;
+        if name == ".wh..wh..opq" {
+            // Opaque whiteout deletes the containing directory.
+            Some(
+                p.parent()
+                    .map(|parent| parent.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            )
+        } else {
+            name.strip_prefix(".wh.").map(|target| {
+                // File whiteout deletes the sibling with the target name.
+                p.parent()
+                    .map(|parent| parent.join(target).to_string_lossy().into_owned())
+                    .unwrap_or_else(|| target.to_string())
+            })
+        }
+    }
+
+    /// Returns true if the given path is a whiteout marker file.
+    pub fn is_whiteout_path(path: &str) -> bool {
+        PathBuf::from(path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|name| name.starts_with(".wh."))
+            .unwrap_or(false)
+    }
+
     fn set_collapsed_recursive(node: &mut FileNode, collapsed: bool) {
         if node.path.as_os_str() != "/" {
             node.collapsed = collapsed;
