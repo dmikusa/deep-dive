@@ -18,3 +18,6 @@ jobs:
         with:
           configurationFile: renovate.json
           token: ${{ secrets.GITHUB_TOKEN }}
+          env-regex: ^(RENOVATE_|LOG_LEVEL)
+        env:
+          LOG_LEVEL: debug
