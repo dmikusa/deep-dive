@@ -343,7 +343,19 @@ impl FileTree {
         }
 
         if !is_root {
-            let branch = if is_last { "└── " } else { "├── " };
+            let is_collapsed_dir =
+                node.info.entry_type == TarEntryType::Directory && node.collapsed;
+            let branch = if is_collapsed_dir {
+                if is_last {
+                    "└─+ "
+                } else {
+                    "├─+ "
+                }
+            } else if is_last {
+                "└── "
+            } else {
+                "├── "
+            };
             let name = node
                 .path
                 .file_name()
@@ -703,6 +715,28 @@ mod tests {
         assert!(stacked.get_node("etc/config").is_none());
         assert!(stacked.get_node("etc/other").is_some());
         assert!(stacked.get_node("etc/.wh.config").is_none());
+    }
+
+    #[test]
+    fn test_collapsed_directory_indicator() {
+        let mut tree = FileTree::new();
+        tree.add_path("dir/sub/file.txt", file_info(10, 1));
+        tree.collapse("dir");
+
+        let lines = tree.render_string_tree(0, 100);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("├─+ dir") || lines[0].contains("└─+ dir"));
+    }
+
+    #[test]
+    fn test_expanded_directory_no_indicator() {
+        let mut tree = FileTree::new();
+        tree.add_path("dir/sub/file.txt", file_info(10, 1));
+
+        let lines = tree.render_string_tree(0, 100);
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].contains("├── dir") || lines[0].contains("└── dir"));
+        assert!(!lines[0].contains("+"));
     }
 
     #[test]

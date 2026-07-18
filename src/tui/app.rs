@@ -191,12 +191,15 @@ async fn run_app<B: Backend>(
                 }
 
                 match state.focus {
-                    FocusPane::LayerList => handle_layer_list_keys(&mut state, key, &mut comparer),
+                    FocusPane::LayerList => {
+                        handle_layer_list_keys(&mut state, key, terminal, &mut comparer)
+                    }
                     FocusPane::FileTree => {
                         handle_file_tree_keys(&mut state, key, terminal, &mut comparer)
                     }
-                    FocusPane::LayerDetails | FocusPane::ImageDetails => {
-                        // Detail panes are view-only; Tab/arrow keys handle focus.
+                    FocusPane::LayerDetails => handle_layer_details_keys(&mut state, key),
+                    FocusPane::ImageDetails => {
+                        // Image details is view-only; Tab/arrow keys handle focus.
                     }
                 }
             }
@@ -204,11 +207,22 @@ async fn run_app<B: Backend>(
     }
 }
 
-fn handle_layer_list_keys(state: &mut AppState, key: event::KeyEvent, comparer: &mut Comparer) {
+fn handle_layer_list_keys<B: Backend>(
+    state: &mut AppState,
+    key: event::KeyEvent,
+    terminal: &Terminal<B>,
+    comparer: &mut Comparer,
+) {
+    let page_size = page_height(terminal);
     if state.config.key_matches("next_layer", key) {
         state.select_next_layer();
     } else if state.config.key_matches("prev_layer", key) {
         state.select_prev_layer();
+    } else if state.config.key_matches("page_up", key) {
+        state.selected_layer = state.selected_layer.saturating_sub(page_size);
+    } else if state.config.key_matches("page_down", key) {
+        state.selected_layer =
+            (state.selected_layer + page_size).min(state.layer_count().saturating_sub(1));
     } else if state.config.key_matches("collapse", key) {
         state.toggle_collapse_selected();
     } else if state.config.key_matches("compare_aggregated", key) {
@@ -221,6 +235,24 @@ fn handle_layer_list_keys(state: &mut AppState, key: event::KeyEvent, comparer: 
             state.collapse_all(&mut tree);
         } else {
             state.expand_all(&mut tree);
+        }
+    }
+}
+
+fn handle_layer_details_keys(state: &mut AppState, key: event::KeyEvent) {
+    let field_count = LayerDetailsWidget::field_count(state);
+    if state.config.key_matches("next_layer", key)
+        || state.config.key_matches("next_tree_node", key)
+    {
+        state.select_next_detail_field(field_count);
+    } else if state.config.key_matches("prev_layer", key)
+        || state.config.key_matches("prev_tree_node", key)
+    {
+        state.select_prev_detail_field(field_count);
+    } else if state.config.key_matches("collapse", key) || key.code == event::KeyCode::Enter {
+        let fields = LayerDetailsWidget::fields(state);
+        if let Some(field) = fields.get(state.selected_detail_field) {
+            state.open_detail_field_modal(field.label, field.value.clone());
         }
     }
 }
@@ -294,6 +326,33 @@ fn handle_modal_key(
     key: event::KeyEvent,
     comparer: &mut Comparer,
 ) -> Option<AppAction> {
+    if matches!(
+        state.modal,
+        crate::tui::state::ModalState::DetailField { .. }
+    ) {
+        if key.code == event::KeyCode::Esc || key.code == event::KeyCode::Enter {
+            state.cancel_modal();
+        } else if key.modifiers.contains(KeyModifiers::CONTROL)
+            && matches!(key.code, KeyCode::Char('c'))
+        {
+            if let Some(value) = state.detail_field_value() {
+                match arboard::Clipboard::new() {
+                    Ok(mut clipboard) => {
+                        if let Err(e) = clipboard.set_text(value) {
+                            state.status_message = Some(format!("Copy failed: {}", e));
+                        } else {
+                            state.status_message = Some("Copied to clipboard".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        state.status_message = Some(format!("Clipboard unavailable: {}", e));
+                    }
+                }
+            }
+        }
+        return None;
+    }
+
     if key.code == event::KeyCode::Esc {
         state.cancel_modal();
     } else if key.code == event::KeyCode::Enter {
@@ -388,6 +447,8 @@ mod tests {
     use crate::analysis::filetree::FileTree;
     use crate::image::{Image, Layer};
     use crossterm::event::KeyModifiers;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
 
     fn test_state() -> AppState {
         let image = Image {
@@ -428,5 +489,55 @@ mod tests {
         assert_eq!(state.focus, FocusPane::FileTree);
         state.cycle_focus();
         assert_eq!(state.focus, FocusPane::LayerDetails);
+    }
+
+    #[test]
+    fn test_layer_list_page_keys_move_selection() {
+        let image = Image {
+            reference: "test".into(),
+            layers: (0..20)
+                .map(|i| Layer::new(i, format!("layer {}", i), 100, FileTree::new()))
+                .collect(),
+        };
+        let mut state = AppState::new(image);
+        state.focus = FocusPane::LayerList;
+        state.selected_layer = 10;
+
+        let backend = TestBackend::new(40, 24);
+        let terminal = Terminal::new(backend).unwrap();
+
+        let layers = state.image.layers.clone();
+        handle_layer_list_keys(
+            &mut state,
+            key(KeyCode::PageUp, false),
+            &terminal,
+            &mut Comparer::new(layers),
+        );
+        assert!(state.selected_layer < 10);
+
+        let layers = state.image.layers.clone();
+        state.selected_layer = 5;
+        handle_layer_list_keys(
+            &mut state,
+            key(KeyCode::PageDown, false),
+            &terminal,
+            &mut Comparer::new(layers),
+        );
+        assert!(state.selected_layer > 5);
+    }
+
+    #[test]
+    fn test_layer_details_keys_select_and_open_modal() {
+        let mut state = test_state();
+        state.focus = FocusPane::LayerDetails;
+        state.selected_layer = 1;
+
+        assert_eq!(state.selected_detail_field, 0);
+        handle_layer_details_keys(&mut state, key(KeyCode::Down, false));
+        assert_eq!(state.selected_detail_field, 1);
+
+        handle_layer_details_keys(&mut state, key(KeyCode::Enter, false));
+        assert!(state.is_modal_active());
+        assert!(state.detail_field_label().is_some());
     }
 }

@@ -78,6 +78,10 @@ pub enum ModalState {
     OpenImage {
         url: String,
     },
+    DetailField {
+        label: String,
+        value: String,
+    },
 }
 
 /// Mutable application state for the TUI.
@@ -100,6 +104,7 @@ pub struct AppState {
     pub status_message: Option<String>,
     pub report: Option<Report>,
     pub modal: ModalState,
+    pub selected_detail_field: usize,
 }
 
 impl AppState {
@@ -152,6 +157,7 @@ impl AppState {
             status_message: None,
             report: None,
             modal: ModalState::default(),
+            selected_detail_field: 0,
         }
     }
 
@@ -446,6 +452,7 @@ impl AppState {
         match &self.modal {
             ModalState::ExtractTo { destination, .. } => Some(destination),
             ModalState::OpenImage { url } => Some(url),
+            ModalState::DetailField { value, .. } => Some(value),
             ModalState::None => None,
         }
     }
@@ -457,11 +464,19 @@ impl AppState {
         }
     }
 
+    /// Return the label of the active detail-field modal, if any.
+    pub fn detail_field_label(&self) -> Option<&str> {
+        match &self.modal {
+            ModalState::DetailField { label, .. } => Some(label),
+            _ => None,
+        }
+    }
+
     pub fn push_modal_char(&mut self, c: char) {
         match &mut self.modal {
             ModalState::ExtractTo { destination, .. } => destination.push(c),
             ModalState::OpenImage { url } => url.push(c),
-            ModalState::None => {}
+            ModalState::DetailField { .. } | ModalState::None => {}
         }
     }
 
@@ -473,7 +488,7 @@ impl AppState {
             ModalState::OpenImage { url } => {
                 url.pop();
             }
-            ModalState::None => {}
+            ModalState::DetailField { .. } | ModalState::None => {}
         }
     }
 
@@ -481,6 +496,34 @@ impl AppState {
         self.modal = ModalState::OpenImage {
             url: current_url.to_string(),
         };
+    }
+
+    pub fn select_next_detail_field(&mut self, field_count: usize) {
+        if field_count > 0 {
+            self.selected_detail_field = (self.selected_detail_field + 1) % field_count;
+        }
+    }
+
+    pub fn select_prev_detail_field(&mut self, field_count: usize) {
+        if field_count > 0 {
+            self.selected_detail_field =
+                self.selected_detail_field.saturating_add(field_count - 1) % field_count;
+        }
+    }
+
+    pub fn open_detail_field_modal(&mut self, label: impl Into<String>, value: impl Into<String>) {
+        self.modal = ModalState::DetailField {
+            label: label.into(),
+            value: value.into(),
+        };
+    }
+
+    /// Return the full value of the active detail-field modal, if any.
+    pub fn detail_field_value(&self) -> Option<&str> {
+        match &self.modal {
+            ModalState::DetailField { value, .. } => Some(value),
+            _ => None,
+        }
     }
 
     pub fn clear_status_message(&mut self) {
@@ -887,5 +930,27 @@ mod tests {
             entry_type: TarEntryType::Directory,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn test_detail_field_selection_cycles() {
+        let mut state = AppState::new(empty_image());
+        state.select_next_detail_field(4);
+        assert_eq!(state.selected_detail_field, 1);
+        state.select_prev_detail_field(4);
+        assert_eq!(state.selected_detail_field, 0);
+        state.select_prev_detail_field(4);
+        assert_eq!(state.selected_detail_field, 3);
+    }
+
+    #[test]
+    fn test_detail_field_modal() {
+        let mut state = AppState::new(empty_image());
+        state.open_detail_field_modal("Command", "RUN echo hello");
+        assert!(state.is_modal_active());
+        assert_eq!(state.detail_field_value().unwrap(), "RUN echo hello");
+        assert_eq!(state.detail_field_label().unwrap(), "Command");
+        state.cancel_modal();
+        assert!(!state.is_modal_active());
     }
 }

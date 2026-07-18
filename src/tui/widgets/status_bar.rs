@@ -24,7 +24,10 @@ impl StatusBarWidget {
                 FocusPane::FileTree => {
                     "↑↓/kj nav  PgUp/dn/u/d page  Space collapse  Ctrl+Space all  Ctrl+O open  Ctrl+Shift+O sort  Ctrl+B attrs  Ctrl+F filter  Ctrl+E extract  Ctrl+A/R/M/U toggle  q quit".to_string()
                 }
-                FocusPane::LayerDetails | FocusPane::ImageDetails => {
+                FocusPane::LayerDetails => {
+                    "↑↓/kj field  Enter view full  Ctrl+C copy  Tab focus  q quit".to_string()
+                }
+                FocusPane::ImageDetails => {
                     "Tab focus  ←→ pane  Ctrl+O open  q quit".to_string()
                 }
             }

@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, List, ListItem, ListState};
 use ratatui::Frame;
 
 use crate::tui::state::{AppState, CompareMode, FocusPane};
-use crate::utils::format_size;
+use crate::utils::{format_size, sanitize_and_truncate};
 
 pub struct LayerListWidget;
 
@@ -22,16 +22,15 @@ impl LayerListWidget {
             _ => format!("Layers [{}]", mode_label),
         };
 
+        let inner_width = area.width.saturating_sub(2) as usize;
         let items: Vec<ListItem> = state
             .layers()
             .iter()
             .map(|layer| {
-                let text = format!(
-                    "{}: [{}] {}",
-                    layer.index,
-                    format_size(layer.size),
-                    layer.command
-                );
+                let prefix = format!("{}: [{}] ", layer.index, format_size(layer.size));
+                let command_width = inner_width.saturating_sub(prefix.len());
+                let command = sanitize_and_truncate(&layer.command, command_width);
+                let text = format!("{}{}", prefix, command);
                 ListItem::new(Text::from(text))
             })
             .collect();
@@ -82,5 +81,23 @@ mod tests {
         let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(content.contains("FROM scratch"));
         assert!(content.contains("ADD file"));
+    }
+
+    #[test]
+    fn test_layer_list_truncates_long_command() {
+        let mut image = test_image();
+        image.layers[1].command = "RUN ".to_string() + &"x".repeat(200);
+        let mut state = AppState::new(image);
+        let backend = TestBackend::new(20, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| LayerListWidget::render(f, f.area(), &mut state))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(content.contains("..."));
+        assert!(!content.contains("xxxxxxxxx")); // the long run of x's should not appear
     }
 }

@@ -1,7 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::tui::state::{AppState, ModalState};
@@ -10,13 +10,22 @@ pub struct ModalWidget;
 
 impl ModalWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
-        let (title, input) = match &state.modal {
-            ModalState::ExtractTo { destination, .. } => ("Extract to", destination.as_str()),
-            ModalState::OpenImage { url } => ("Open image", url.as_str()),
-            ModalState::None => return,
-        };
+        match &state.modal {
+            ModalState::DetailField { label, value } => {
+                Self::render_detail_field(frame, area, label, value);
+            }
+            ModalState::ExtractTo { destination, .. } => {
+                Self::render_input_modal(frame, area, "Extract to", destination);
+            }
+            ModalState::OpenImage { url } => {
+                Self::render_input_modal(frame, area, "Open image", url);
+            }
+            ModalState::None => {}
+        }
+    }
 
-        let popup_area = Self::modal_area(area);
+    fn render_input_modal(frame: &mut Frame, area: Rect, title: &str, input: &str) {
+        let popup_area = Self::small_modal_area(area);
         frame.render_widget(Clear, popup_area);
 
         let text = Text::from(Line::from(vec![
@@ -26,13 +35,46 @@ impl ModalWidget {
         let paragraph = Paragraph::new(text)
             .block(Block::bordered().title(title))
             .style(Style::default().fg(Color::White))
-            .wrap(ratatui::widgets::Wrap { trim: false });
+            .wrap(Wrap { trim: false });
         frame.render_widget(paragraph, popup_area);
     }
 
-    fn modal_area(area: Rect) -> Rect {
+    fn render_detail_field(frame: &mut Frame, area: Rect, label: &str, value: &str) {
+        let popup_area = Self::large_modal_area(area);
+        frame.render_widget(Clear, popup_area);
+
+        let text = Text::from(vec![
+            Line::from(vec![Span::styled(
+                format!("{}: ", label),
+                Style::default().fg(Color::Yellow),
+            )]),
+            Line::from(Span::raw(value)),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Ctrl+C to copy  •  Esc or Enter to close",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]);
+        let paragraph = Paragraph::new(text)
+            .block(Block::bordered().title(format!("{} - Full value", label)))
+            .style(Style::default().fg(Color::White))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, popup_area);
+    }
+
+    fn small_modal_area(area: Rect) -> Rect {
         let width = area.width.saturating_sub(4).clamp(20, 60);
         let height = 3u16;
+        Self::centered_area(area, width, height)
+    }
+
+    fn large_modal_area(area: Rect) -> Rect {
+        let width = (area.width * 75) / 100;
+        let height = (area.height * 75) / 100;
+        Self::centered_area(area, width, height)
+    }
+
+    fn centered_area(area: Rect, width: u16, height: u16) -> Rect {
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -83,5 +125,30 @@ mod tests {
         let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(content.contains("Extract to"));
         assert!(content.contains("/tmp/output"));
+    }
+
+    #[test]
+    fn test_detail_field_modal_renders() {
+        let image = Image {
+            reference: "test".into(),
+            layers: vec![Layer::new(0, "ADD", 0, FileTree::new())],
+        };
+        let mut state = AppState::new(image);
+        state.modal = crate::tui::state::ModalState::DetailField {
+            label: "Command".to_string(),
+            value: "RUN echo hello".to_string(),
+        };
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| ModalWidget::render(f, f.area(), &state))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(content.contains("Command"));
+        assert!(content.contains("RUN echo hello"));
+        assert!(content.contains("Ctrl+C"));
     }
 }
