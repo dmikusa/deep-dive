@@ -3,6 +3,7 @@
   "minimumReleaseAge": "7 days",
   "labels": ["dependencies"],
   "enabledManagers": ["cargo", "github-actions"],
+  "ignorePaths": [".github/workflows/release.yml"],
   "packageRules": [
     {
       "matchManagers": ["cargo"],
