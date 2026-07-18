@@ -185,9 +185,35 @@ All bindings can be overridden in the config file.
 | Yellow | Modified in the selected layer |
 | Default | Unmodified |
 
+## Image inspections
+
+`deep-dive` runs analyzers against the parsed image and displays the results in
+the Image Details pane. The analyzer framework is extensible; new inspections
+can be added without changing the UI.
+
+### Efficiency
+
+The Efficiency analyzer measures how much space is wasted by file duplication
+and deletions across layers.
+
+- **Score** — ranges from 0% to 100%. 100% means every byte appears exactly
+  once in the final image; lower scores mean more wasted space.
+- **Wasted bytes** — the total bytes that exist in layer tars but are not
+  needed in the final image.
+- **Inefficiencies** — the top files that contribute to waste, such as:
+  - A file that exists in multiple layers with different content (the older
+    copies are wasted).
+  - A file that was added in a lower layer and then deleted by a whiteout
+    file in an upper layer.
+
+For example, if `/usr/bin/app` is 10 MB in layer 3 and then overwritten by a
+12 MB version in layer 7, the 10 MB from layer 3 counts as wasted space.
+
 ## Screenshots
 
-Screenshots will be added to the release assets and documentation.
+![Layers and file tree](screenshots/layers-and-file-tree.png)
+
+![Image details pane](screenshots/image-details.png)
 
 ## Development
 
