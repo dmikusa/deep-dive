@@ -5,7 +5,9 @@
   "labels": ["dependencies"],
   "enabledManagers": ["cargo", "github-actions"],
   "ignorePaths": [".github/workflows/release.yml"],
-  "repositories": ["dmikusa/deep-dive"],
+  "autodiscover": true,
+  "autodiscoverFilter": "dmikusa/deep-dive",
+  "gitAuthor": "Daniel Mikusa <dmikusa@users.noreply.github.com>",
   "packageRules": [
     {
       "matchManagers": ["cargo"],
