@@ -3,7 +3,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 use ratatui::Frame;
 
 use crate::analysis::comparer::Comparer;
@@ -48,11 +48,23 @@ impl FileTreeWidget {
         tree.set_sort_mode(state.sort_mode);
         state.apply_collapsed_to_tree(&mut tree);
 
+        let visible_paths =
+            tree.visible_paths_filtered(&state.hidden_diff_types, state.filter_regex().as_ref());
+        let total_rows = visible_paths.len();
         let height = area.height.saturating_sub(2) as usize; // account for borders
-        let total_rows = tree
-            .visible_paths_filtered(&state.hidden_diff_types, state.filter_regex().as_ref())
-            .len();
         let max_offset = total_rows.saturating_sub(height);
+
+        // Keep the selected path visible in the viewport.
+        if let Some(selected) = &state.selected_tree_path {
+            if let Some(index) = visible_paths.iter().position(|p| p == selected) {
+                if index < state.tree_scroll_offset {
+                    state.tree_scroll_offset = index;
+                } else if index >= state.tree_scroll_offset + height {
+                    state.tree_scroll_offset = index.saturating_sub(height - 1);
+                }
+            }
+        }
+
         state.tree_scroll_offset = state.tree_scroll_offset.min(max_offset);
 
         let lines = tree.render_tree_filtered(
@@ -62,15 +74,6 @@ impl FileTreeWidget {
             state.filter_regex().as_ref(),
             state.show_attributes,
         );
-
-        // Keep the selected path visible inside the viewport.
-        if let Some(selected) = &state.selected_tree_path {
-            if let Some(pos) = lines.iter().position(|l| &l.path == selected) {
-                if pos >= height {
-                    state.tree_scroll_offset += pos - height + 1;
-                }
-            }
-        }
 
         let text_lines: Vec<Line> = lines
             .into_iter()
@@ -102,6 +105,15 @@ impl FileTreeWidget {
             Paragraph::new(Text::from(text_lines)).block(Block::bordered().title(title))
         };
         frame.render_widget(paragraph, area);
+
+        // Render a scrollbar on the right edge of the file tree pane.
+        let mut scrollbar_state =
+            ScrollbarState::new(total_rows).position(state.tree_scroll_offset);
+        let scrollbar = Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None);
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 
     fn style_for_diff_type(diff_type: DiffType) -> Style {
@@ -156,6 +168,87 @@ mod tests {
         let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(content.contains("bin"));
         assert!(content.contains("bash"));
+    }
+
+    #[test]
+    fn test_file_tree_scrolls_to_keep_selection_visible() {
+        let mut tree = FileTree::new();
+        for i in 0..50 {
+            let path = format!("file{}.txt", i);
+            tree.add_path(
+                &path,
+                FileInfo {
+                    entry_type: TarEntryType::Regular,
+                    size: 10,
+                    content_hash: i as u64,
+                    ..Default::default()
+                },
+            );
+        }
+        tree.mark_all(DiffType::Added);
+
+        let image = Image {
+            reference: "test".into(),
+            layers: vec![Layer::new(0, "ADD files", 500, tree)],
+        };
+
+        let mut state = AppState::new(image);
+        state.focus = FocusPane::FileTree;
+        // Select a node well below the initial viewport.
+        state.selected_tree_path = Some("file40.txt".into());
+        let mut comparer = Comparer::new(state.image.layers.clone());
+        let backend = TestBackend::new(40, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| FileTreeWidget::render(f, f.area(), &mut state, &mut comparer))
+            .unwrap();
+
+        assert!(
+            state.tree_scroll_offset > 0,
+            "scroll offset should move to keep selection visible"
+        );
+    }
+
+    #[test]
+    fn test_file_tree_scrolls_up_to_keep_selection_visible() {
+        let mut tree = FileTree::new();
+        for i in 0..50 {
+            let path = format!("file{}.txt", i);
+            tree.add_path(
+                &path,
+                FileInfo {
+                    entry_type: TarEntryType::Regular,
+                    size: 10,
+                    content_hash: i as u64,
+                    ..Default::default()
+                },
+            );
+        }
+        tree.mark_all(DiffType::Added);
+
+        let image = Image {
+            reference: "test".into(),
+            layers: vec![Layer::new(0, "ADD files", 500, tree)],
+        };
+
+        let mut state = AppState::new(image);
+        state.focus = FocusPane::FileTree;
+        state.selected_tree_path = Some("file0.txt".into());
+        // Start scrolled far down; render should snap back to show the selection.
+        state.tree_scroll_offset = 40;
+        let mut comparer = Comparer::new(state.image.layers.clone());
+        let backend = TestBackend::new(40, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|f| FileTreeWidget::render(f, f.area(), &mut state, &mut comparer))
+            .unwrap();
+
+        assert_eq!(
+            state.tree_scroll_offset, 0,
+            "scroll offset should snap back to top when selection is above viewport"
+        );
     }
 
     #[test]
