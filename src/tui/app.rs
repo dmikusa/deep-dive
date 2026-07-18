@@ -164,17 +164,11 @@ async fn run_app<B: Backend>(
                     state.open_image_modal(&state.image.reference.clone());
                     continue;
                 }
-                if state.config.key_matches("focus_next", key)
-                    || (state.focus != FocusPane::FileTree
-                        && matches!(key.code, KeyCode::Right | KeyCode::Char('l')))
-                {
+                if state.config.key_matches("focus_next", key) {
                     state.cycle_focus();
                     continue;
                 }
-                if state.config.key_matches("focus_prev", key)
-                    || (state.focus != FocusPane::FileTree
-                        && matches!(key.code, KeyCode::Left | KeyCode::Char('h')))
-                {
+                if state.config.key_matches("focus_prev", key) {
                     state.cycle_focus_reverse();
                     continue;
                 }

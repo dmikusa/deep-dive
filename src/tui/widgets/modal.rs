@@ -43,12 +43,13 @@ impl ModalWidget {
         let popup_area = Self::large_modal_area(area);
         frame.render_widget(Clear, popup_area);
 
+        let sanitized = Self::sanitize_value(value);
         let text = Text::from(vec![
             Line::from(vec![Span::styled(
                 format!("{}: ", label),
                 Style::default().fg(Color::Yellow),
             )]),
-            Line::from(Span::raw(value)),
+            Line::from(Span::raw(sanitized)),
             Line::from(""),
             Line::from(Span::styled(
                 "Ctrl+C to copy  •  Esc or Enter to close",
@@ -60,6 +61,20 @@ impl ModalWidget {
             .style(Style::default().fg(Color::White))
             .wrap(Wrap { trim: false });
         frame.render_widget(paragraph, popup_area);
+    }
+
+    fn sanitize_value(value: &str) -> String {
+        let ansi_stripped =
+            regex::Regex::new(r"\x1B\[[0-9;]*[A-Za-z]")
+                .unwrap()
+                .replace_all(value, "");
+        let tab_replaced = ansi_stripped.replace('\t', " ");
+        tab_replaced
+            .chars()
+            .filter(|ch| {
+                !ch.is_control() || *ch == '\n'
+            })
+            .collect()
     }
 
     fn small_modal_area(area: Rect) -> Rect {

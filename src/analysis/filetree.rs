@@ -327,17 +327,22 @@ impl FileTree {
                 return;
             }
             let children = Self::sorted_children(&node.children, sort_mode);
-            for child in children.iter() {
-                Self::render_node(
-                    child,
-                    prefix,
-                    false,
-                    lines,
-                    sort_mode,
-                    hidden_diff_types,
-                    filter,
-                    show_attributes,
-                );
+            let last_visible_idx = children
+                .iter()
+                .rposition(|c| Self::is_visible(c, hidden_diff_types, filter));
+            for (i, child) in children.iter().enumerate() {
+                if Self::is_visible(child, hidden_diff_types, filter) {
+                    Self::render_node(
+                        child,
+                        prefix,
+                        Some(i) == last_visible_idx,
+                        lines,
+                        sort_mode,
+                        hidden_diff_types,
+                        filter,
+                        show_attributes,
+                    );
+                }
             }
             return;
         }
@@ -965,5 +970,60 @@ mod tests {
         assert_eq!(perms, "-rw-r--r--");
         let dir_perms = FileTree::format_mode(0o755, TarEntryType::Directory);
         assert_eq!(dir_perms, "drwxr-xr-x");
+    }
+
+    #[test]
+    fn test_render_hidden_node_last_child_connector() {
+        let mut tree = FileTree::new();
+        tree.add_path("var/cache/apt/archives", dir_info());
+        tree.add_path("var/lib/apt/extended_states", file_info(10, 1));
+        // Hide the entire `var` subtree to force pass-through rendering.
+        tree.get_node_mut("var").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/cache").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/cache/apt").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/cache/apt/archives").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/lib").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/lib/apt").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/lib/apt/extended_states").unwrap().diff_type = DiffType::Added;
+
+        let mut hidden = HashSet::new();
+        hidden.insert(DiffType::Added);
+        let lines = tree.render_tree_filtered(0, 100, &hidden, None, false);
+        assert!(lines.is_empty(), "all nodes hidden");
+    }
+
+    #[test]
+    fn test_render_hidden_parent_correct_is_last() {
+        let mut tree = FileTree::new();
+        // Tree: var/{cache, lib} where cache has child apt, lib has child apt
+        tree.add_path("var/cache/apt/archives", dir_info());
+        tree.add_path("var/lib/apt/extended_states", file_info(10, 1));
+
+        // Hide `cache` (diff type hidden) but keep its descendant `archives` visible.
+        tree.get_node_mut("var/cache").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/cache/apt").unwrap().diff_type = DiffType::Added;
+
+        let mut hidden = HashSet::new();
+        hidden.insert(DiffType::Added);
+
+        let lines = tree.render_tree_filtered(0, 100, &hidden, None, false);
+        // `var` (visible) -> children: `cache` (hidden, passed through), `lib` (visible)
+        // `cache`-passed-through child: `apt` (hidden) -> `archives` (visible)
+        // `lib` (visible) -> `apt` (visible) -> `extended_states` (visible)
+        //
+        // Expected rendering:
+        //   var
+        //   ├── archives      (var/cache/apt/archives, passed through hidden nodes)
+        //   └── lib
+        //       └── apt
+        //           └── extended_states
+        //
+        // The key check: `archives` should start with "├── " (not last visible
+        // under var — `lib` follows).  `lib` should start with "└── ".
+
+        assert!(lines[0].text.trim_start().starts_with("├── archives"),
+            "first visible child should use ├── when not last: {:?}", lines[0].text);
+        assert!(lines[1].text.trim_start().starts_with("└── lib"),
+            "second (last) child should use └──: {:?}", lines[1].text);
     }
 }
