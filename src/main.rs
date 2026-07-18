@@ -13,6 +13,7 @@ mod utils;
 use analysis::analyzers::efficiency::EfficiencyAnalyzer;
 use analysis::report::{Analyzer, Report};
 use cli::Cli;
+use config::Config;
 use image::docker::archive::DockerArchiveResolver;
 use image::docker::engine::DockerEngineResolver;
 use image::oci::layout::OciLayoutResolver;
@@ -26,6 +27,8 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("deep-dive starting for image: {}", args.image);
 
+    let config = Config::load(args.config.as_deref())?;
+
     let image = if is_docker_uri(&args.image) {
         DockerEngineResolver::new()?.fetch(&args.image).await
     } else {
@@ -38,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let analyzers: Vec<Box<dyn Analyzer>> = vec![Box::new(EfficiencyAnalyzer)];
     let report = Report::generate(&image, &analyzers)?;
 
-    tui::app::run(image, report).await
+    tui::app::run(image, report, config).await
 }
 
 fn is_docker_uri(uri: &str) -> bool {

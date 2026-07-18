@@ -19,7 +19,7 @@ impl LayerListWidget {
         };
         let title = match state.focus {
             FocusPane::LayerList => format!("Layers [{}] [*]", mode_label),
-            FocusPane::FileTree => format!("Layers [{}]", mode_label),
+            _ => format!("Layers [{}]", mode_label),
         };
 
         let items: Vec<ListItem> = state
@@ -62,18 +62,8 @@ mod tests {
         Image {
             reference: "test".into(),
             layers: vec![
-                Layer {
-                    index: 0,
-                    command: "FROM scratch".into(),
-                    size: 0,
-                    tree: FileTree::new(),
-                },
-                Layer {
-                    index: 1,
-                    command: "ADD file".into(),
-                    size: 1024,
-                    tree: FileTree::new(),
-                },
+                Layer::new(0, "FROM scratch", 0, FileTree::new()),
+                Layer::new(1, "ADD file", 1024, FileTree::new()),
             ],
         }
     }

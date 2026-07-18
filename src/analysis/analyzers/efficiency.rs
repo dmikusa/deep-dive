@@ -270,12 +270,7 @@ mod tests {
 
         let image = Image {
             reference: "test".into(),
-            layers: vec![Layer {
-                index: 0,
-                command: "add a".into(),
-                size: 100,
-                tree,
-            }],
+            layers: vec![Layer::new(0, "add a", 100, tree)],
         };
 
         let analyzer = EfficiencyAnalyzer;
@@ -296,18 +291,8 @@ mod tests {
         let image = Image {
             reference: "test".into(),
             layers: vec![
-                Layer {
-                    index: 0,
-                    command: "add a".into(),
-                    size: 100,
-                    tree: layer0,
-                },
-                Layer {
-                    index: 1,
-                    command: "add a".into(),
-                    size: 100,
-                    tree: layer1,
-                },
+                Layer::new(0, "add a", 100, layer0),
+                Layer::new(1, "add a", 100, layer1),
             ],
         };
 
@@ -330,18 +315,8 @@ mod tests {
         let image = Image {
             reference: "test".into(),
             layers: vec![
-                Layer {
-                    index: 0,
-                    command: "add a".into(),
-                    size: 100,
-                    tree: layer0,
-                },
-                Layer {
-                    index: 1,
-                    command: "remove a".into(),
-                    size: 0,
-                    tree: layer1,
-                },
+                Layer::new(0, "add a", 100, layer0),
+                Layer::new(1, "remove a", 0, layer1),
             ],
         };
 

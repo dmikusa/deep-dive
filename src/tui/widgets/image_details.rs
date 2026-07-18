@@ -9,8 +9,11 @@ use crate::tui::state::AppState;
 pub struct ImageDetailsWidget;
 
 impl ImageDetailsWidget {
-    pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
-        let title = "Image Details";
+    pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
+        let title = match state.focus {
+            crate::tui::state::FocusPane::ImageDetails => "Image Details [*]",
+            _ => "Image Details",
+        };
         let text = if let Some(report) = &state.report {
             let mut lines: Vec<Line> = Vec::new();
             lines.push(Line::from(Span::styled(

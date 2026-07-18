@@ -20,7 +20,7 @@ impl FileTreeWidget {
         };
         let mut title = match state.focus {
             FocusPane::FileTree => format!("File Tree [{}] [*]", mode_label),
-            FocusPane::LayerList => format!("File Tree [{}]", mode_label),
+            _ => format!("File Tree [{}]", mode_label),
         };
         if state.show_attributes {
             title.push_str(" [attrs]");
@@ -137,12 +137,7 @@ mod tests {
 
         Image {
             reference: "test".into(),
-            layers: vec![Layer {
-                index: 0,
-                command: "ADD files".into(),
-                size: 100,
-                tree,
-            }],
+            layers: vec![Layer::new(0, "ADD files", 100, tree)],
         }
     }
 
@@ -188,12 +183,7 @@ mod tests {
 
         let image = Image {
             reference: "test".into(),
-            layers: vec![Layer {
-                index: 0,
-                command: "ADD files".into(),
-                size: 110,
-                tree,
-            }],
+            layers: vec![Layer::new(0, "ADD files", 110, tree)],
         };
 
         let mut state = AppState::new(image);

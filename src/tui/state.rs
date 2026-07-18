@@ -8,6 +8,7 @@ use regex::Regex;
 
 use crate::analysis::filetree::{DiffType, FileTree, SortMode};
 use crate::analysis::report::Report;
+use crate::config::Config;
 use crate::image::Image;
 
 /// Display data for a single layer in the layer list.
@@ -23,6 +24,38 @@ pub enum FocusPane {
     #[default]
     LayerList,
     FileTree,
+    LayerDetails,
+    ImageDetails,
+}
+
+impl FocusPane {
+    /// All focusable panes in their natural order.
+    const ORDER: [Self; 4] = [
+        Self::LayerList,
+        Self::FileTree,
+        Self::LayerDetails,
+        Self::ImageDetails,
+    ];
+
+    pub fn next(self) -> Self {
+        let mut iter = Self::ORDER.iter().cycle();
+        while let Some(pane) = iter.next() {
+            if *pane == self {
+                return *iter.next().unwrap_or(&Self::LayerList);
+            }
+        }
+        Self::LayerList
+    }
+
+    pub fn prev(self) -> Self {
+        let mut iter = Self::ORDER.iter().rev().cycle();
+        while let Some(pane) = iter.next() {
+            if *pane == self {
+                return *iter.next().unwrap_or(&Self::LayerList);
+            }
+        }
+        Self::LayerList
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -36,6 +69,7 @@ pub enum CompareMode {
 #[derive(Debug)]
 pub struct AppState {
     pub image: Image,
+    pub config: Config,
     pub selected_layer: usize,
     pub collapsed_paths: HashSet<String>,
     pub hidden_diff_types: HashSet<DiffType>,
@@ -54,25 +88,51 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(image: Image) -> Self {
+        Self::with_config(image, Config::default())
+    }
+
+    pub fn with_config(image: Image, config: Config) -> Self {
         let selected_layer = if image.layers.is_empty() {
             0
         } else {
             image.layers.len() - 1
         };
+
+        let compare_mode = config
+            .compare_mode
+            .as_deref()
+            .and_then(|s| match s.to_ascii_lowercase().as_str() {
+                "aggregated" => Some(CompareMode::Aggregated),
+                "natural" => Some(CompareMode::Natural),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        let sort_mode = config
+            .sort_mode
+            .as_deref()
+            .and_then(|s| match s.to_ascii_lowercase().as_str() {
+                "size" => Some(SortMode::Size),
+                "name" => Some(SortMode::Name),
+                _ => None,
+            })
+            .unwrap_or_default();
+
         Self {
             image,
+            config: config.clone(),
             selected_layer,
             collapsed_paths: HashSet::new(),
             hidden_diff_types: HashSet::new(),
-            sort_mode: SortMode::default(),
-            compare_mode: CompareMode::default(),
+            sort_mode,
+            compare_mode,
             focus: FocusPane::default(),
-            show_attributes: false,
+            show_attributes: config.show_attributes.unwrap_or(false),
             filter_text: String::new(),
             is_filter_active: false,
             selected_tree_path: None,
             tree_scroll_offset: 0,
-            wrap_tree: false,
+            wrap_tree: config.wrap_tree.unwrap_or(false),
             status_message: None,
             report: None,
         }
@@ -111,10 +171,11 @@ impl AppState {
     }
 
     pub fn cycle_focus(&mut self) {
-        self.focus = match self.focus {
-            FocusPane::LayerList => FocusPane::FileTree,
-            FocusPane::FileTree => FocusPane::LayerList,
-        };
+        self.focus = self.focus.next();
+    }
+
+    pub fn cycle_focus_reverse(&mut self) {
+        self.focus = self.focus.prev();
     }
 
     /// Move the file-tree selection to the next visible node.
@@ -324,11 +385,8 @@ mod tests {
 
     fn image_with_layers(count: usize) -> Image {
         let layers = (0..count)
-            .map(|i| crate::image::Layer {
-                index: i,
-                command: format!("layer {}", i),
-                size: i as u64 * 100,
-                tree: FileTree::new(),
+            .map(|i| {
+                crate::image::Layer::new(i, format!("layer {}", i), i as u64 * 100, FileTree::new())
             })
             .collect();
         Image {
@@ -408,7 +466,20 @@ mod tests {
         state.cycle_focus();
         assert_eq!(state.focus, FocusPane::FileTree);
         state.cycle_focus();
+        assert_eq!(state.focus, FocusPane::LayerDetails);
+        state.cycle_focus();
+        assert_eq!(state.focus, FocusPane::ImageDetails);
+        state.cycle_focus();
         assert_eq!(state.focus, FocusPane::LayerList);
+    }
+
+    #[test]
+    fn test_cycle_focus_reverse() {
+        let mut state = AppState::new(empty_image());
+        state.cycle_focus_reverse();
+        assert_eq!(state.focus, FocusPane::ImageDetails);
+        state.cycle_focus_reverse();
+        assert_eq!(state.focus, FocusPane::LayerDetails);
     }
 
     #[test]

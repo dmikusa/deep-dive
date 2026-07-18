@@ -82,9 +82,16 @@ struct OciDescriptor {
     digest: String,
 }
 
+struct LayerSource {
+    data: Result<Vec<u8>>,
+    id: Option<String>,
+    digest: Option<String>,
+}
+
 fn build_layers(
     config: &ImageConfig,
-    layer_data_iter: impl Iterator<Item = Result<Vec<u8>>>,
+    layer_sources: impl Iterator<Item = LayerSource>,
+    tags: &[String],
 ) -> Result<Vec<Layer>> {
     let non_empty_history: Vec<&HistoryEntry> = config
         .history
@@ -93,8 +100,8 @@ fn build_layers(
         .collect();
 
     let mut layers = Vec::new();
-    for (i, layer_data) in layer_data_iter.enumerate() {
-        let layer_data = layer_data?;
+    for (i, source) in layer_sources.enumerate() {
+        let layer_data = source.data?;
         let decompressed = decompress_to_vec(&layer_data)?;
         let tar_entries = parse_tar_entries(decompressed.as_slice())?;
 
@@ -127,6 +134,9 @@ fn build_layers(
             command,
             size,
             tree,
+            id: source.id,
+            digest: source.digest,
+            tags: tags.to_vec(),
         });
     }
 
@@ -163,11 +173,17 @@ pub fn parse_docker_save_tar(reader: impl Read) -> Result<Image> {
     let layers = build_layers(
         &config,
         manifest.layers.iter().map(|layer_path| {
-            entries
-                .get(layer_path)
-                .cloned()
-                .with_context(|| format!("layer {} not found", layer_path))
+            let id = layer_path.split('/').next().map(|s| s.to_string());
+            LayerSource {
+                data: entries
+                    .get(layer_path)
+                    .cloned()
+                    .with_context(|| format!("layer {} not found", layer_path)),
+                id,
+                digest: None,
+            }
         }),
+        &manifest.repo_tags,
     )?;
 
     let reference = manifest.repo_tags.first().cloned().unwrap_or_default();
@@ -256,12 +272,20 @@ fn parse_oci_layout_entries(entries: HashMap<String, Vec<u8>>) -> Result<Image> 
     let layers = build_layers(
         &config,
         manifest.layers.iter().map(|layer_desc| {
-            let layer_hash = digest_to_hex(&layer_desc.digest)?;
-            entries
-                .get(&format!("blobs/sha256/{}", layer_hash))
-                .cloned()
-                .with_context(|| format!("failed to read layer blob {}", layer_desc.digest))
+            let digest = layer_desc.digest.clone();
+            let data = digest_to_hex(&digest).and_then(|layer_hash| {
+                entries
+                    .get(&format!("blobs/sha256/{}", layer_hash))
+                    .cloned()
+                    .with_context(|| format!("failed to read layer blob {}", digest))
+            });
+            LayerSource {
+                data,
+                id: Some(digest.clone()),
+                digest: Some(digest),
+            }
         }),
+        &[],
     )?;
 
     Ok(Image {

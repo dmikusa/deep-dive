@@ -24,6 +24,9 @@ impl StatusBarWidget {
                 FocusPane::FileTree => {
                     "↑↓/kj nav  PgUp/dn/u/d page  Space collapse  Ctrl+Space all  Ctrl+O sort  Ctrl+B attrs  Ctrl+F filter  Ctrl+E extract  Ctrl+A/R/M/U toggle  q quit".to_string()
                 }
+                FocusPane::LayerDetails | FocusPane::ImageDetails => {
+                    "Tab focus  ←→ pane  q quit".to_string()
+                }
             }
         };
         let paragraph = Paragraph::new(Text::from(text)).style(Style::default().fg(Color::White));

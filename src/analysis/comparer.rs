@@ -133,21 +133,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        Layer {
-            index,
-            command: format!("layer {}", index),
-            size,
-            tree,
-        }
+        Layer::new(index, format!("layer {}", index), size, tree)
     }
 
     fn empty_layer(index: usize) -> Layer {
-        Layer {
-            index,
-            command: format!("empty {}", index),
-            size: 0,
-            tree: FileTree::new(),
-        }
+        Layer::new(index, format!("empty {}", index), 0, FileTree::new())
     }
 
     #[test]
@@ -230,18 +220,8 @@ mod tests {
         );
 
         let layers = vec![
-            Layer {
-                index: 0,
-                command: "add config".into(),
-                size: 100,
-                tree: layer0,
-            },
-            Layer {
-                index: 1,
-                command: "remove config".into(),
-                size: 0,
-                tree: layer1,
-            },
+            Layer::new(0, "add config", 100, layer0),
+            Layer::new(1, "remove config", 0, layer1),
         ];
         let mut comparer = Comparer::new(layers);
 
