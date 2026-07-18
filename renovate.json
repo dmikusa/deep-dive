@@ -5,7 +5,6 @@
   "labels": ["dependencies"],
   "enabledManagers": ["cargo", "github-actions"],
   "ignorePaths": [".github/workflows/release.yml"],
-  "gitAuthor": "Daniel Mikusa <dmikusa@users.noreply.github.com>",
   "packageRules": [
     {
       "matchManagers": ["cargo"],
