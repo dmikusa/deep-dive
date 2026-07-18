@@ -16,5 +16,5 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: renovatebot/github-action@22e0a16091fc706b04affe6ae53d5e3358ac4023 # v46.1.19
         with:
+          configurationFile: renovate.json
           token: ${{ secrets.GITHUB_TOKEN }}
-          docker-volumes: ${{ github.workspace }}:${{ github.workspace }},/tmp:/tmp

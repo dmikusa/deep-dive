@@ -5,6 +5,7 @@
   "labels": ["dependencies"],
   "enabledManagers": ["cargo", "github-actions"],
   "ignorePaths": [".github/workflows/release.yml"],
+  "repositories": ["dmikusa/deep-dive"],
   "packageRules": [
     {
       "matchManagers": ["cargo"],
