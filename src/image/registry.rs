@@ -11,6 +11,7 @@ use oci_client::{Client, Reference};
 use serde::Deserialize;
 
 use crate::analysis::archive::{build_layers, ImageConfig, LayerSource};
+use crate::image::progress::{status, ProgressSender};
 use crate::image::resolver::{ImageSource, Resolver};
 use crate::image::Image;
 
@@ -69,7 +70,9 @@ impl Resolver for RegistryResolver {
         let config: ImageConfig = serde_json::from_str(&config_json)
             .context("failed to parse image config from registry")?;
 
-        let layers = self.pull_layers(&reference, &manifest, &config).await?;
+        let layers = self
+            .pull_layers(&reference, &manifest, &config, None)
+            .await?;
 
         Ok(Image {
             reference: image_ref.to_string(),
@@ -79,6 +82,36 @@ impl Resolver for RegistryResolver {
 
     fn source_type(&self) -> ImageSource {
         ImageSource::Registry
+    }
+
+    async fn fetch_with_progress(
+        &self,
+        image_ref: &str,
+        progress: ProgressSender,
+    ) -> Result<Image> {
+        let reference = Self::normalize_image_ref(image_ref)?;
+
+        status(&progress, "Resolving registry credentials...").await;
+        let auth = registry_auth(&reference).await;
+
+        status(&progress, format!("Pulling manifest for {}", reference)).await;
+        let (manifest, _digest, config_json) = self
+            .client
+            .pull_manifest_and_config(&reference, &auth)
+            .await
+            .with_context(|| format!("failed to pull manifest for {}", reference))?;
+
+        let config: ImageConfig = serde_json::from_str(&config_json)
+            .context("failed to parse image config from registry")?;
+
+        let layers = self
+            .pull_layers(&reference, &manifest, &config, Some(&progress))
+            .await?;
+
+        Ok(Image {
+            reference: image_ref.to_string(),
+            layers,
+        })
     }
 }
 
@@ -105,11 +138,20 @@ impl RegistryResolver {
         reference: &Reference,
         manifest: &OciImageManifest,
         config: &ImageConfig,
+        progress: Option<&ProgressSender>,
     ) -> Result<Vec<crate::image::Layer>> {
         let mut layer_sources = Vec::with_capacity(manifest.layers.len());
+        let total = manifest.layers.len();
 
         for (i, layer) in manifest.layers.iter().enumerate() {
             let digest = layer.digest.clone();
+            if let Some(p) = progress {
+                status(
+                    p,
+                    format!("Pulling layer {} of {} ({:.12})", i + 1, total, digest),
+                )
+                .await;
+            }
             let mut data = Vec::new();
             self.client
                 .pull_blob(reference, layer.digest.as_str(), &mut data)

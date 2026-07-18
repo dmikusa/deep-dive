@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::io::Cursor;
 
 use anyhow::{bail, Context, Result};
@@ -9,6 +7,7 @@ use bollard::Docker;
 use futures::stream::StreamExt;
 
 use crate::analysis::archive::parse_docker_save_tar;
+use crate::image::progress::{bytes, status, ProgressSender};
 use crate::image::resolver::{ImageSource, Resolver};
 use crate::image::Image;
 
@@ -41,60 +40,77 @@ impl DockerEngineResolver {
         }
     }
 
-    async fn image_exists(&self, image_name: &str) -> Result<bool> {
+    async fn image_exists(
+        &self,
+        image_name: &str,
+    ) -> Result<Option<bollard::models::ImageInspect>> {
         match self.client.inspect_image(image_name).await {
-            Ok(_) => Ok(true),
+            Ok(inspect) => Ok(Some(inspect)),
             Err(bollard::errors::Error::DockerResponseServerError {
                 status_code: 404, ..
-            }) => Ok(false),
+            }) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
 
-    async fn pull_image(&self, image_name: &str) -> Result<()> {
+    async fn pull_image(&self, image_name: &str, progress: Option<&ProgressSender>) -> Result<()> {
         let options = CreateImageOptionsBuilder::default()
             .from_image(image_name)
             .build();
 
         let mut stream = self.client.create_image(Some(options), None, None);
-        while let Some(progress) = stream.next().await {
-            let progress = progress?;
-            if let Some(status) = progress.status {
-                let detail =
-                    progress
-                        .progress_detail
-                        .as_ref()
-                        .map_or_else(String::new, |d| match (d.current, d.total) {
-                            (Some(c), Some(t)) => format!(" ({}/{})", c, t),
-                            (Some(c), None) => format!(" ({})", c),
-                            _ => String::new(),
-                        });
-                eprint!("\r\x1B[2KPulling {}: {}{}", image_name, status, detail);
+        while let Some(event) = stream.next().await {
+            let event = event?;
+            if let Some(status_text) = event.status {
+                let detail = event
+                    .progress_detail
+                    .as_ref()
+                    .map_or_else(String::new, |d| match (d.current, d.total) {
+                        (Some(c), Some(t)) => format!(" ({}/{})", c, t),
+                        (Some(c), None) => format!(" ({})", c),
+                        _ => String::new(),
+                    });
+                if let Some(p) = progress {
+                    status(
+                        p,
+                        format!("Pulling {}: {}{}", image_name, status_text, detail),
+                    )
+                    .await;
+                }
+            }
+            if let (Some(p), Some(detail)) = (progress, event.progress_detail.as_ref()) {
+                if let (Some(current), Some(total)) = (detail.current, detail.total) {
+                    bytes(p, current.max(0) as u64, Some(total.max(0) as u64)).await;
+                }
             }
         }
-        eprintln!();
         Ok(())
     }
 
-    async fn export_image(&self, image_name: &str) -> Result<Vec<u8>> {
+    async fn export_image(
+        &self,
+        image_name: &str,
+        progress: Option<&ProgressSender>,
+        total_size: Option<u64>,
+    ) -> Result<Vec<u8>> {
         let mut stream = self.client.export_image(image_name);
 
-        let mut bytes = Vec::new();
+        let mut output = Vec::new();
         let mut chunk_count = 0;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk?;
-            bytes.extend_from_slice(&chunk);
+            output.extend_from_slice(&chunk);
             chunk_count += 1;
             if chunk_count % 10 == 0 {
-                eprint!(
-                    "\r\x1B[2KExporting {}: {} bytes received",
-                    image_name,
-                    bytes.len()
-                );
+                if let Some(p) = progress {
+                    bytes(p, output.len() as u64, total_size).await;
+                }
             }
         }
-        eprintln!();
-        Ok(bytes)
+        if let Some(p) = progress {
+            bytes(p, output.len() as u64, Some(output.len() as u64)).await;
+        }
+        Ok(output)
     }
 }
 
@@ -109,13 +125,11 @@ impl Resolver for DockerEngineResolver {
     async fn fetch(&self, image_ref: &str) -> Result<Image> {
         let image_name = Self::normalize_image_ref(image_ref)?;
 
-        if !self.image_exists(image_name).await? {
-            eprintln!("Image {} not found locally, pulling...", image_name);
-            self.pull_image(image_name).await?;
+        if self.image_exists(image_name).await?.is_none() {
+            self.pull_image(image_name, None).await?;
         }
 
-        eprintln!("Exporting image {}...", image_name);
-        let bytes = self.export_image(image_name).await?;
+        let bytes = self.export_image(image_name, None, None).await?;
 
         let mut image = parse_docker_save_tar(Cursor::new(bytes))?;
         image.reference = image_ref.to_string();
@@ -124,6 +138,35 @@ impl Resolver for DockerEngineResolver {
 
     fn source_type(&self) -> ImageSource {
         ImageSource::Docker
+    }
+
+    async fn fetch_with_progress(
+        &self,
+        image_ref: &str,
+        progress: ProgressSender,
+    ) -> Result<Image> {
+        let image_name = Self::normalize_image_ref(image_ref)?;
+
+        status(&progress, format!("Checking {}", image_name)).await;
+        if self.image_exists(image_name).await?.is_none() {
+            status(&progress, format!("Pulling {}", image_name)).await;
+            self.pull_image(image_name, Some(&progress)).await?;
+        }
+
+        status(&progress, format!("Exporting {}", image_name)).await;
+        let inspect = self
+            .image_exists(image_name)
+            .await?
+            .context("image not found after pull/export")?;
+        let total_size = inspect.size.map(|s| s.max(0) as u64);
+        let bytes = self
+            .export_image(image_name, Some(&progress), total_size)
+            .await?;
+
+        status(&progress, "Parsing image...".to_string()).await;
+        let mut image = parse_docker_save_tar(Cursor::new(bytes))?;
+        image.reference = image_ref.to_string();
+        Ok(image)
     }
 }
 

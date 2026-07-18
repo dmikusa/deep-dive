@@ -75,6 +75,9 @@ pub enum ModalState {
         destination: String,
         original_path: String,
     },
+    OpenImage {
+        url: String,
+    },
 }
 
 /// Mutable application state for the TUI.
@@ -409,7 +412,6 @@ impl AppState {
         };
         Ok(())
     }
-
     pub fn confirm_extract_modal(&mut self, tree: &FileTree) -> Result<()> {
         if let ModalState::ExtractTo {
             ref destination, ..
@@ -422,6 +424,16 @@ impl AppState {
         Ok(())
     }
 
+    /// Confirm the "Open image" modal and return the entered URL.
+    pub fn confirm_open_image_modal(&mut self) -> Option<String> {
+        let url = match &self.modal {
+            ModalState::OpenImage { url } => Some(url.clone()),
+            _ => None,
+        };
+        self.modal = ModalState::None;
+        url
+    }
+
     pub fn cancel_modal(&mut self) {
         self.modal = ModalState::None;
     }
@@ -430,23 +442,45 @@ impl AppState {
         !matches!(self.modal, ModalState::None)
     }
 
-    pub fn modal_destination(&self) -> Option<&str> {
+    pub fn modal_input(&self) -> Option<&str> {
         match &self.modal {
             ModalState::ExtractTo { destination, .. } => Some(destination),
+            ModalState::OpenImage { url } => Some(url),
             ModalState::None => None,
         }
     }
 
+    pub fn modal_destination(&self) -> Option<&str> {
+        match &self.modal {
+            ModalState::ExtractTo { destination, .. } => Some(destination),
+            _ => None,
+        }
+    }
+
     pub fn push_modal_char(&mut self, c: char) {
-        if let ModalState::ExtractTo { destination, .. } = &mut self.modal {
-            destination.push(c);
+        match &mut self.modal {
+            ModalState::ExtractTo { destination, .. } => destination.push(c),
+            ModalState::OpenImage { url } => url.push(c),
+            ModalState::None => {}
         }
     }
 
     pub fn pop_modal_char(&mut self) {
-        if let ModalState::ExtractTo { destination, .. } = &mut self.modal {
-            destination.pop();
+        match &mut self.modal {
+            ModalState::ExtractTo { destination, .. } => {
+                destination.pop();
+            }
+            ModalState::OpenImage { url } => {
+                url.pop();
+            }
+            ModalState::None => {}
         }
+    }
+
+    pub fn open_image_modal(&mut self, current_url: &str) {
+        self.modal = ModalState::OpenImage {
+            url: current_url.to_string(),
+        };
     }
 
     pub fn clear_status_message(&mut self) {

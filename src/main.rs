@@ -11,15 +11,9 @@ mod tui;
 mod utils;
 
 use analysis::analyzers::efficiency::EfficiencyAnalyzer;
-use analysis::report::{Analyzer, Report};
+use analysis::report::Analyzer;
 use cli::Cli;
 use config::Config;
-use image::docker::archive::DockerArchiveResolver;
-use image::docker::engine::DockerEngineResolver;
-use image::oci::layout::OciLayoutResolver;
-use image::registry::RegistryResolver;
-use image::resolver::Resolver;
-use image::Image;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,24 +23,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("deep-dive starting for image: {}", args.image);
 
     let config = Config::load(args.config.as_deref())?;
-
-    let image = if is_docker_uri(&args.image) {
-        DockerEngineResolver::new()?.fetch(&args.image).await
-    } else {
-        let mut loader = tui::loader::Loader::new(format!("Loading {}", args.image));
-        let result = resolve_image(&args.image).await;
-        loader.stop();
-        result
-    }?;
-
     let analyzers: Vec<Box<dyn Analyzer>> = vec![Box::new(EfficiencyAnalyzer)];
-    let report = Report::generate(&image, &analyzers)?;
 
-    tui::app::run(image, report, config).await
-}
-
-fn is_docker_uri(uri: &str) -> bool {
-    uri.starts_with("docker://") || !uri.contains("://")
+    tui::app::run(args.image, analyzers, config).await
 }
 
 fn init_tracing(args: &Cli) {
@@ -83,34 +62,15 @@ fn init_tracing(args: &Cli) {
     }
 }
 
-async fn resolve_image(uri: &str) -> anyhow::Result<Image> {
-    if uri.starts_with("docker-archive://") {
-        DockerArchiveResolver::new().fetch(uri).await
-    } else if uri.starts_with("oci://") {
-        OciLayoutResolver::new().fetch(uri).await
-    } else if uri.starts_with("registry://") {
-        RegistryResolver::new().fetch(uri).await
-    } else if uri.starts_with("podman://") {
-        anyhow::bail!(
-            "Podman resolver is not yet implemented (coming in Phase 11). \
-             Use docker://, docker-archive://path/to/image.tar, or oci://path/to/layout instead."
-        )
-    } else {
-        anyhow::bail!(
-            "Unsupported image URI: {}. Expected one of: \
-             docker://..., docker-archive://..., oci://..., registry://..., podman://...",
-            uri
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::resolver::is_docker_uri;
 
     #[tokio::test]
     async fn test_resolve_image_unsupported_scheme() {
-        let err = resolve_image("ftp://example.com/image.tar")
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let err = image::resolve_with_progress("ftp://example.com/image.tar", tx)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Unsupported image URI"));

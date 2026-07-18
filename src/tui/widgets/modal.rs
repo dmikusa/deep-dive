@@ -4,25 +4,27 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
-use crate::tui::state::AppState;
+use crate::tui::state::{AppState, ModalState};
 
 pub struct ModalWidget;
 
 impl ModalWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
-        let Some(destination) = state.modal_destination() else {
-            return;
+        let (title, input) = match &state.modal {
+            ModalState::ExtractTo { destination, .. } => ("Extract to", destination.as_str()),
+            ModalState::OpenImage { url } => ("Open image", url.as_str()),
+            ModalState::None => return,
         };
 
         let popup_area = Self::modal_area(area);
         frame.render_widget(Clear, popup_area);
 
         let text = Text::from(Line::from(vec![
-            Span::raw(destination),
+            Span::raw(input),
             Span::styled("▌", Style::default().fg(Color::White)),
         ]));
         let paragraph = Paragraph::new(text)
-            .block(Block::bordered().title("Extract to"))
+            .block(Block::bordered().title(title))
             .style(Style::default().fg(Color::White))
             .wrap(ratatui::widgets::Wrap { trim: false });
         frame.render_widget(paragraph, popup_area);

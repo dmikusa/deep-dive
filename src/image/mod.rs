@@ -2,6 +2,8 @@
 
 pub mod docker;
 pub mod oci;
+pub mod podman;
+pub mod progress;
 pub mod registry;
 pub mod resolver;
 
@@ -36,5 +38,48 @@ impl Layer {
             tree,
             ..Default::default()
         }
+    }
+}
+
+/// Resolve an image URI while reporting progress to the given sender.
+///
+/// The URI scheme selects the resolver:
+/// - `docker://` or bare reference → Docker daemon
+/// - `docker-archive://` → Docker save tar file
+/// - `oci://` → OCI layout directory or archive
+/// - `registry://` → OCI registry
+/// - `podman://` → Podman
+pub async fn resolve_with_progress(
+    uri: &str,
+    progress: progress::ProgressSender,
+) -> anyhow::Result<Image> {
+    use resolver::{is_docker_uri, Resolver};
+
+    if is_docker_uri(uri) {
+        docker::engine::DockerEngineResolver::new()?
+            .fetch_with_progress(uri, progress)
+            .await
+    } else if uri.starts_with("docker-archive://") {
+        docker::archive::DockerArchiveResolver::new()
+            .fetch_with_progress(uri, progress)
+            .await
+    } else if uri.starts_with("oci://") {
+        oci::layout::OciLayoutResolver::new()
+            .fetch_with_progress(uri, progress)
+            .await
+    } else if uri.starts_with("registry://") {
+        registry::RegistryResolver::new()
+            .fetch_with_progress(uri, progress)
+            .await
+    } else if uri.starts_with("podman://") {
+        podman::resolver::PodmanResolver::new()
+            .fetch_with_progress(uri, progress)
+            .await
+    } else {
+        anyhow::bail!(
+            "Unsupported image URI: {}. Expected one of: \
+             docker://..., docker-archive://..., oci://..., registry://..., podman://...",
+            uri
+        )
     }
 }

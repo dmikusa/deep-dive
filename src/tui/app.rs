@@ -1,15 +1,16 @@
 use std::io;
 
-use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use anyhow::{bail, Result};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Terminal;
 
 use crate::analysis::comparer::Comparer;
 use crate::analysis::filetree::DiffType;
-use crate::analysis::report::Report;
+use crate::analysis::report::{Analyzer, Report};
 use crate::config::Config;
+use crate::image::progress::Progress;
 use crate::image::Image;
 use crate::tui::state::{AppState, CompareMode, FocusPane};
 use crate::tui::widgets::file_tree::FileTreeWidget;
@@ -17,24 +18,117 @@ use crate::tui::widgets::filter::FilterWidget;
 use crate::tui::widgets::image_details::ImageDetailsWidget;
 use crate::tui::widgets::layer_details::LayerDetailsWidget;
 use crate::tui::widgets::layer_list::LayerListWidget;
+use crate::tui::widgets::loading::LoadingWidget;
 use crate::tui::widgets::modal::ModalWidget;
 use crate::tui::widgets::status_bar::StatusBarWidget;
 
-pub async fn run(image: Image, report: Report, config: Config) -> Result<()> {
+/// Action produced by the main app loop that tells the caller what to do next.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppAction {
+    /// Exit the application.
+    Quit,
+    /// Load a different image and restart the main loop.
+    OpenImage(String),
+}
+
+pub async fn run(
+    image_ref: String,
+    analyzers: Vec<Box<dyn Analyzer>>,
+    config: Config,
+) -> Result<()> {
     let mut terminal = ratatui::init();
-    let mut state = AppState::with_config(image, config);
-    state.report = Some(report);
-    let result = run_app(&mut terminal, &mut state).await;
+    let result = run_loop(&mut terminal, image_ref, analyzers, config).await;
     ratatui::restore();
     result
 }
 
-async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -> Result<()> {
+async fn run_loop<B: Backend>(
+    terminal: &mut Terminal<B>,
+    mut image_ref: String,
+    analyzers: Vec<Box<dyn Analyzer>>,
+    config: Config,
+) -> Result<()> {
+    loop {
+        let (image, report) = run_loading(terminal, &image_ref, &analyzers, &config).await?;
+        let action = run_app(terminal, image, report, config.clone()).await?;
+        match action {
+            AppAction::Quit => break,
+            AppAction::OpenImage(new_ref) => {
+                image_ref = new_ref;
+                continue;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_loading<B: Backend>(
+    terminal: &mut Terminal<B>,
+    image_ref: &str,
+    analyzers: &[Box<dyn Analyzer>],
+    config: &Config,
+) -> Result<(Image, Report)> {
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<Progress>(32);
+    let status_ref = image_ref.to_string();
+    let image_ref = image_ref.to_string();
+    let mut handle =
+        tokio::spawn(
+            async move { crate::image::resolve_with_progress(&image_ref, progress_tx).await },
+        );
+
+    let mut status = format!("Loading {}", status_ref);
+    let mut progress: Option<(u64, Option<u64>)> = None;
+    let mut event_reader = tokio::task::spawn_blocking(event::read);
+
+    loop {
+        terminal.draw(|f| LoadingWidget::render(f, f.area(), &status, progress))?;
+
+        tokio::select! {
+            msg = progress_rx.recv() => {
+                if let Some(msg) = msg {
+                    match msg {
+                        Progress::Status(s) => status = s,
+                        Progress::Bytes { current, total } => progress = Some((current, total)),
+                    }
+                }
+            }
+            result = &mut handle => {
+                let image = result.map_err(|e| anyhow::anyhow!(e))??;
+                let report = Report::generate(&image, analyzers)?;
+                return Ok((image, report));
+            }
+                event = &mut event_reader => {
+                    match event {
+                        Ok(Ok(Event::Key(key)))
+                            if key.kind == KeyEventKind::Press
+                                && (config.key_matches("quit", key)
+                                    || (key.modifiers.contains(KeyModifiers::CONTROL)
+                                        && matches!(key.code, KeyCode::Char('c')))) =>
+                        {
+                            handle.abort();
+                            bail!("quit");
+                        }
+                        _ => {}
+                    }
+                    event_reader = tokio::task::spawn_blocking(event::read);
+                }
+        }
+    }
+}
+
+async fn run_app<B: Backend>(
+    terminal: &mut Terminal<B>,
+    image: Image,
+    report: Report,
+    config: Config,
+) -> Result<AppAction> {
+    let mut state = AppState::with_config(image, config);
+    state.report = Some(report);
     let mut comparer = Comparer::new(state.image.layers.clone());
     comparer.build_cache();
 
     loop {
-        terminal.draw(|f| ui(f, state, &mut comparer))?;
+        terminal.draw(|f| ui(f, &mut state, &mut comparer))?;
 
         let event = tokio::task::spawn_blocking(event::read)
             .await
@@ -43,19 +137,25 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
         if let Event::Key(key) = event {
             if key.kind == KeyEventKind::Press {
                 if state.is_modal_active() {
-                    handle_modal_key(state, key, &mut comparer);
+                    if let Some(action) = handle_modal_key(&mut state, key, &mut comparer) {
+                        return Ok(action);
+                    }
                     continue;
                 }
 
                 if state.is_filter_active {
-                    handle_filter_key(state, key);
+                    handle_filter_key(&mut state, key);
                     continue;
                 }
 
                 state.clear_status_message();
 
                 if state.config.key_matches("quit", key) {
-                    break;
+                    return Ok(AppAction::Quit);
+                }
+                if state.config.key_matches("open_image", key) {
+                    state.open_image_modal(&state.image.reference.clone());
+                    continue;
                 }
                 if state.config.key_matches("focus_next", key)
                     || (state.focus != FocusPane::FileTree
@@ -91,9 +191,9 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
                 }
 
                 match state.focus {
-                    FocusPane::LayerList => handle_layer_list_keys(state, key, &mut comparer),
+                    FocusPane::LayerList => handle_layer_list_keys(&mut state, key, &mut comparer),
                     FocusPane::FileTree => {
-                        handle_file_tree_keys(state, key, terminal, &mut comparer)
+                        handle_file_tree_keys(&mut state, key, terminal, &mut comparer)
                     }
                     FocusPane::LayerDetails | FocusPane::ImageDetails => {
                         // Detail panes are view-only; Tab/arrow keys handle focus.
@@ -102,8 +202,6 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
             }
         }
     }
-
-    Ok(())
 }
 
 fn handle_layer_list_keys(state: &mut AppState, key: event::KeyEvent, comparer: &mut Comparer) {
@@ -191,19 +289,30 @@ fn handle_filter_key(state: &mut AppState, key: event::KeyEvent) {
     }
 }
 
-fn handle_modal_key(state: &mut AppState, key: event::KeyEvent, comparer: &mut Comparer) {
+fn handle_modal_key(
+    state: &mut AppState,
+    key: event::KeyEvent,
+    comparer: &mut Comparer,
+) -> Option<AppAction> {
     if key.code == event::KeyCode::Esc {
         state.cancel_modal();
     } else if key.code == event::KeyCode::Enter {
-        let tree = current_tree(state, comparer);
-        if let Err(e) = state.confirm_extract_modal(&tree) {
-            state.status_message = Some(format!("Extract failed: {}", e));
-        }
+        return state
+            .confirm_open_image_modal()
+            .map(AppAction::OpenImage)
+            .or_else(|| {
+                let tree = current_tree(state, comparer);
+                if let Err(e) = state.confirm_extract_modal(&tree) {
+                    state.status_message = Some(format!("Extract failed: {}", e));
+                }
+                None
+            });
     } else if key.code == event::KeyCode::Backspace {
         state.pop_modal_char();
     } else if let event::KeyCode::Char(c) = key.code {
         state.push_modal_char(c);
     }
+    None
 }
 
 fn ui(frame: &mut ratatui::Frame, state: &mut AppState, comparer: &mut Comparer) {

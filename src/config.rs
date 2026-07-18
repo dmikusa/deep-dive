@@ -102,6 +102,10 @@ fn default_config_path() -> Option<PathBuf> {
 fn key_matches_binding(key: KeyEvent, binding: &str) -> bool {
     let parts: Vec<&str> = binding.split('+').map(str::trim).collect();
     let wants_ctrl = parts.iter().any(|p| p.eq_ignore_ascii_case("ctrl"));
+    let wants_shift = parts.iter().any(|p| p.eq_ignore_ascii_case("shift"));
+    let wants_super = parts
+        .iter()
+        .any(|p| p.eq_ignore_ascii_case("super") || p.eq_ignore_ascii_case("cmd"));
     let key_part = parts.last().copied().unwrap_or("");
 
     let code_match = match key.code {
@@ -120,30 +124,58 @@ fn key_matches_binding(key: KeyEvent, binding: &str) -> bool {
         _ => false,
     };
 
-    code_match && key.modifiers.contains(KeyModifiers::CONTROL) == wants_ctrl
+    code_match
+        && key.modifiers.contains(KeyModifiers::CONTROL) == wants_ctrl
+        && key.modifiers.contains(KeyModifiers::SHIFT) == wants_shift
+        && key.modifiers.contains(KeyModifiers::SUPER) == wants_super
 }
 
 fn default_key_matches(action: &str, key: KeyEvent) -> bool {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let no_mod = key.modifiers.is_empty();
     match action {
         "quit" => {
-            matches!(key.code, KeyCode::Char('q'))
+            (no_mod && matches!(key.code, KeyCode::Char('q')))
                 || (ctrl && matches!(key.code, KeyCode::Char('c')))
         }
         "filter" => ctrl && matches!(key.code, KeyCode::Char('f')),
-        "collapse" => matches!(key.code, KeyCode::Enter | KeyCode::Char(' ')),
+        "collapse" => {
+            matches!(key.code, KeyCode::Enter) || (no_mod && matches!(key.code, KeyCode::Char(' ')))
+        }
         "collapse_all" => ctrl && matches!(key.code, KeyCode::Char(' ')),
-        "next_layer" => matches!(key.code, KeyCode::Down | KeyCode::Char('j')),
-        "prev_layer" => matches!(key.code, KeyCode::Up | KeyCode::Char('k')),
-        "next_tree_node" => matches!(key.code, KeyCode::Down | KeyCode::Char('j')),
-        "prev_tree_node" => matches!(key.code, KeyCode::Up | KeyCode::Char('k')),
-        "page_down" => matches!(key.code, KeyCode::PageDown | KeyCode::Char('d')),
-        "page_up" => matches!(key.code, KeyCode::PageUp | KeyCode::Char('u')),
+        "next_layer" => {
+            matches!(key.code, KeyCode::Down) || (no_mod && matches!(key.code, KeyCode::Char('j')))
+        }
+        "prev_layer" => {
+            matches!(key.code, KeyCode::Up) || (no_mod && matches!(key.code, KeyCode::Char('k')))
+        }
+        "next_tree_node" => {
+            matches!(key.code, KeyCode::Down) || (no_mod && matches!(key.code, KeyCode::Char('j')))
+        }
+        "prev_tree_node" => {
+            matches!(key.code, KeyCode::Up) || (no_mod && matches!(key.code, KeyCode::Char('k')))
+        }
+        "page_down" => {
+            matches!(key.code, KeyCode::PageDown)
+                || (no_mod && matches!(key.code, KeyCode::Char('d')))
+        }
+        "page_up" => {
+            matches!(key.code, KeyCode::PageUp)
+                || (no_mod && matches!(key.code, KeyCode::Char('u')))
+        }
         "compare_aggregated" => ctrl && matches!(key.code, KeyCode::Char('a')),
         "compare_natural" => ctrl && matches!(key.code, KeyCode::Char('l')),
         "toggle_attributes" => ctrl && matches!(key.code, KeyCode::Char('b')),
         "toggle_wrap" => ctrl && matches!(key.code, KeyCode::Char('p')),
-        "toggle_sort" => ctrl && matches!(key.code, KeyCode::Char('o')),
+        "toggle_sort" => {
+            ctrl && key.modifiers.contains(KeyModifiers::SHIFT)
+                && matches!(key.code, KeyCode::Char('O'))
+        }
+        "open_image" => {
+            matches!(key.code, KeyCode::Char('o'))
+                && (key.modifiers.contains(KeyModifiers::CONTROL)
+                    || key.modifiers.contains(KeyModifiers::SUPER))
+        }
         "toggle_diff_added" => ctrl && matches!(key.code, KeyCode::Char('a')),
         "toggle_diff_removed" => ctrl && matches!(key.code, KeyCode::Char('r')),
         "toggle_diff_modified" => ctrl && matches!(key.code, KeyCode::Char('m')),
@@ -212,6 +244,8 @@ extract:
         assert!(config.key_matches("prev_layer", key(KeyCode::Char('k'), false)));
         assert!(config.key_matches("extract", key(KeyCode::Char('e'), true)));
         assert!(!config.key_matches("quit", key(KeyCode::Char('Q'), false)));
+        assert!(!config.key_matches("page_up", key(KeyCode::Char('u'), true)));
+        assert!(config.key_matches("toggle_diff_unmodified", key(KeyCode::Char('u'), true)));
     }
 
     #[test]
