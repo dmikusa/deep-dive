@@ -21,4 +21,21 @@ jobs:
       - uses: Swatinem/rust-cache@9d47c4ad4b02e033a513b1e8f3b14e298f3ef0a0 # v2
       - run: cargo fmt -- --check
       - run: cargo clippy -- -D warnings
-      - run: cargo test
+      - run: cargo test -- --include-ignored
+      - name: Run benchmarks
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cargo bench --bench comparer -- --noplot | tee benchmark-output.txt
+          {
+            echo "### Criterion Benchmark Results"
+            echo ""
+            echo "\`\`\`"
+            cat benchmark-output.txt
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Criterion HTML report
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@65c4c4a1ddee5b72d6987c6d2e8b1d3a3b7bd4e6 # v4
+        with:
+          name: criterion-report
+          path: target/criterion/
