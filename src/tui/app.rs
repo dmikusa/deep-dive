@@ -1,4 +1,5 @@
 use std::io;
+use std::time::Duration;
 
 use anyhow::{bail, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -78,7 +79,6 @@ async fn run_loading<B: Backend>(
 
     let mut status = format!("Loading {}", status_ref);
     let mut progress: Option<(u64, Option<u64>)> = None;
-    let mut event_reader = tokio::task::spawn_blocking(event::read);
 
     loop {
         terminal.draw(|f| LoadingWidget::render(f, f.area(), &status, progress))?;
@@ -97,21 +97,28 @@ async fn run_loading<B: Backend>(
                 let report = Report::generate(&image, analyzers)?;
                 return Ok((image, report));
             }
-                event = &mut event_reader => {
-                    match event {
-                        Ok(Ok(Event::Key(key)))
-                            if key.kind == KeyEventKind::Press
-                                && (config.key_matches("quit", key)
-                                    || (key.modifiers.contains(KeyModifiers::CONTROL)
-                                        && matches!(key.code, KeyCode::Char('c')))) =>
-                        {
-                            handle.abort();
-                            bail!("quit");
-                        }
-                        _ => {}
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                match tokio::task::spawn_blocking(|| {
+                    if event::poll(Duration::ZERO).unwrap_or(false) {
+                        event::read().ok()
+                    } else {
+                        None
                     }
-                    event_reader = tokio::task::spawn_blocking(event::read);
+                })
+                .await
+                {
+                    Ok(Some(Event::Key(key)))
+                        if key.kind == KeyEventKind::Press
+                            && (config.key_matches("quit", key)
+                                || (key.modifiers.contains(KeyModifiers::CONTROL)
+                                    && matches!(key.code, KeyCode::Char('c')))) =>
+                    {
+                        handle.abort();
+                        bail!("quit");
+                    }
+                    _ => {}
                 }
+            }
         }
     }
 }
