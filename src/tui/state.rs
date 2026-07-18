@@ -80,7 +80,6 @@ pub enum ModalState {
     },
     DetailField {
         label: String,
-        value: String,
     },
 }
 
@@ -452,8 +451,7 @@ impl AppState {
         match &self.modal {
             ModalState::ExtractTo { destination, .. } => Some(destination),
             ModalState::OpenImage { url } => Some(url),
-            ModalState::DetailField { value, .. } => Some(value),
-            ModalState::None => None,
+            ModalState::DetailField { .. } | ModalState::None => None,
         }
     }
 
@@ -511,17 +509,24 @@ impl AppState {
         }
     }
 
-    pub fn open_detail_field_modal(&mut self, label: impl Into<String>, value: impl Into<String>) {
+    pub fn open_detail_field_modal(&mut self, label: impl Into<String>) {
         self.modal = ModalState::DetailField {
             label: label.into(),
-            value: value.into(),
         };
     }
 
-    /// Return the full value of the active detail-field modal, if any.
-    pub fn detail_field_value(&self) -> Option<&str> {
+    /// Return the full value of the active detail-field modal, if any,
+    /// looking it up from the currently selected layer.
+    pub fn detail_field_value(&self) -> Option<String> {
         match &self.modal {
-            ModalState::DetailField { value, .. } => Some(value),
+            ModalState::DetailField { label } => {
+                let fields =
+                    crate::tui::widgets::layer_details::LayerDetailsWidget::fields(self);
+                fields
+                    .iter()
+                    .find(|f| f.label == label.as_str())
+                    .map(|f| f.value.clone())
+            }
             _ => None,
         }
     }
@@ -945,8 +950,15 @@ mod tests {
 
     #[test]
     fn test_detail_field_modal() {
-        let mut state = AppState::new(empty_image());
-        state.open_detail_field_modal("Command", "RUN echo hello");
+        let mut image = empty_image();
+        image.layers.push(crate::image::Layer::new(
+            0,
+            "RUN echo hello",
+            100,
+            FileTree::new(),
+        ));
+        let mut state = AppState::new(image);
+        state.open_detail_field_modal("Command");
         assert!(state.is_modal_active());
         assert_eq!(state.detail_field_value().unwrap(), "RUN echo hello");
         assert_eq!(state.detail_field_label().unwrap(), "Command");

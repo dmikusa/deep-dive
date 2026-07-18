@@ -253,7 +253,7 @@ fn handle_layer_details_keys(state: &mut AppState, key: event::KeyEvent) {
     } else if state.config.key_matches("collapse", key) || key.code == event::KeyCode::Enter {
         let fields = LayerDetailsWidget::fields(state);
         if let Some(field) = fields.get(state.selected_detail_field) {
-            state.open_detail_field_modal(field.label, field.value.clone());
+            state.open_detail_field_modal(field.label);
         }
     }
 }
@@ -331,7 +331,11 @@ fn handle_modal_key(
         state.modal,
         crate::tui::state::ModalState::DetailField { .. }
     ) {
-        if key.code == event::KeyCode::Esc || key.code == event::KeyCode::Enter {
+        if state.config.key_matches("next_layer", key) {
+            state.select_next_layer();
+        } else if state.config.key_matches("prev_layer", key) {
+            state.select_prev_layer();
+        } else if key.code == event::KeyCode::Esc || key.code == event::KeyCode::Enter {
             state.cancel_modal();
         } else if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('c'))
@@ -339,7 +343,7 @@ fn handle_modal_key(
             if let Some(value) = state.detail_field_value() {
                 match arboard::Clipboard::new() {
                     Ok(mut clipboard) => {
-                        if let Err(e) = clipboard.set_text(value) {
+                        if let Err(e) = clipboard.set_text(&value) {
                             state.status_message = Some(format!("Copy failed: {}", e));
                         } else {
                             state.status_message = Some("Copied to clipboard".to_string());

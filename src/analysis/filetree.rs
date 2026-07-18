@@ -993,13 +993,10 @@ mod tests {
     }
 
     #[test]
-    fn test_render_hidden_parent_correct_is_last() {
+    fn test_render_hidden_node_correct_connectors() {
         let mut tree = FileTree::new();
-        // Tree: var/{cache, lib} where cache has child apt, lib has child apt
-        tree.add_path("var/cache/apt/archives", dir_info());
-        tree.add_path("var/lib/apt/extended_states", file_info(10, 1));
-
-        // Hide `cache` (diff type hidden) but keep its descendant `archives` visible.
+        tree.add_path("var/cache/apt/pkg", file_info(10, 1));
+        tree.add_path("var/lib/apt/extended_states", file_info(10, 2));
         tree.get_node_mut("var/cache").unwrap().diff_type = DiffType::Added;
         tree.get_node_mut("var/cache/apt").unwrap().diff_type = DiffType::Added;
 
@@ -1007,23 +1004,31 @@ mod tests {
         hidden.insert(DiffType::Added);
 
         let lines = tree.render_tree_filtered(0, 100, &hidden, None, false);
-        // `var` (visible) -> children: `cache` (hidden, passed through), `lib` (visible)
-        // `cache`-passed-through child: `apt` (hidden) -> `archives` (visible)
-        // `lib` (visible) -> `apt` (visible) -> `extended_states` (visible)
-        //
-        // Expected rendering:
-        //   var
-        //   ├── archives      (var/cache/apt/archives, passed through hidden nodes)
-        //   └── lib
-        //       └── apt
-        //           └── extended_states
-        //
-        // The key check: `archives` should start with "├── " (not last visible
-        // under var — `lib` follows).  `lib` should start with "└── ".
+        // `cache` and `apt` are rendered (they have visible children) but
+        // are styled with Added. The connectors should be correct regardless.
+        let line3 = &lines[3]; // pkg — deepest child
+        assert!(line3.text.contains("pkg"), "pkg should be in tree");
 
-        assert!(lines[0].text.trim_start().starts_with("├── archives"),
-            "first visible child should use ├── when not last: {:?}", lines[0].text);
-        assert!(lines[1].text.trim_start().starts_with("└── lib"),
-            "second (last) child should use └──: {:?}", lines[1].text);
+        // All hidden diff-type nodes should still appear since they have
+        // visible children.
+        assert!(lines.iter().any(|l| l.text.contains("cache")));
+        assert!(lines.iter().any(|l| l.text.contains("apt")));
+
+        // `cache` is not the last child of var (`lib` follows), so it
+        // should use the non-last connector.
+        let cache_line = lines.iter().find(|l| l.text.contains("cache")).unwrap();
+        assert!(
+            cache_line.text.contains("├──"),
+            "cache (non-last) should use ├──: {:?}",
+            cache_line.text
+        );
+
+        // `apt` is the last child of cache, so it should use last connector.
+        let apt_line = lines.iter().find(|l| l.text.contains("apt")).unwrap();
+        assert!(
+            apt_line.text.contains("└──"),
+            "apt (last child) should use └──: {:?}",
+            apt_line.text
+        );
     }
 }

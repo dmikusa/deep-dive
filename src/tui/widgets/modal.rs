@@ -11,8 +11,8 @@ pub struct ModalWidget;
 impl ModalWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         match &state.modal {
-            ModalState::DetailField { label, value } => {
-                Self::render_detail_field(frame, area, label, value);
+            ModalState::DetailField { label } => {
+                Self::render_detail_field(frame, area, state, label);
             }
             ModalState::ExtractTo { destination, .. } => {
                 Self::render_input_modal(frame, area, "Extract to", destination);
@@ -39,11 +39,12 @@ impl ModalWidget {
         frame.render_widget(paragraph, popup_area);
     }
 
-    fn render_detail_field(frame: &mut Frame, area: Rect, label: &str, value: &str) {
+    fn render_detail_field(frame: &mut Frame, area: Rect, state: &AppState, label: &str) {
         let popup_area = Self::large_modal_area(area);
         frame.render_widget(Clear, popup_area);
 
-        let sanitized = Self::sanitize_value(value);
+        let value = Self::detail_field_value(state, label);
+        let sanitized = Self::sanitize_value(&value);
         let text = Text::from(vec![
             Line::from(vec![Span::styled(
                 format!("{}: ", label),
@@ -52,7 +53,7 @@ impl ModalWidget {
             Line::from(Span::raw(sanitized)),
             Line::from(""),
             Line::from(Span::styled(
-                "Ctrl+C to copy  •  Esc or Enter to close",
+                "↑/↓ change layer  •  Ctrl+C copy  •  Esc/Enter close",
                 Style::default().fg(Color::DarkGray),
             )),
         ]);
@@ -61,6 +62,16 @@ impl ModalWidget {
             .style(Style::default().fg(Color::White))
             .wrap(Wrap { trim: false });
         frame.render_widget(paragraph, popup_area);
+    }
+
+    fn detail_field_value(state: &AppState, label: &str) -> String {
+        use crate::tui::widgets::layer_details::LayerDetailsWidget;
+        let fields = LayerDetailsWidget::fields(state);
+        fields
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| f.value.clone())
+            .unwrap_or_default()
     }
 
     fn sanitize_value(value: &str) -> String {
@@ -146,13 +157,10 @@ mod tests {
     fn test_detail_field_modal_renders() {
         let image = Image {
             reference: "test".into(),
-            layers: vec![Layer::new(0, "ADD", 0, FileTree::new())],
+            layers: vec![Layer::new(0, "RUN echo hello", 0, FileTree::new())],
         };
         let mut state = AppState::new(image);
-        state.modal = crate::tui::state::ModalState::DetailField {
-            label: "Command".to_string(),
-            value: "RUN echo hello".to_string(),
-        };
+        state.open_detail_field_modal("Command");
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -164,6 +172,6 @@ mod tests {
         let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(content.contains("Command"));
         assert!(content.contains("RUN echo hello"));
-        assert!(content.contains("Ctrl+C"));
+        assert!(content.contains("copy"));
     }
 }
