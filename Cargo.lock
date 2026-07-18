@@ -592,6 +592,7 @@ dependencies = [
  "anyhow",
  "assert_fs",
  "async-trait",
+ "base64",
  "bitflags",
  "bollard",
  "clap",

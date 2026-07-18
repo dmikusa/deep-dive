@@ -2,6 +2,7 @@
 
 pub mod docker;
 pub mod oci;
+pub mod registry;
 pub mod resolver;
 
 use crate::analysis::filetree::FileTree;

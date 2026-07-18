@@ -17,6 +17,7 @@ use config::Config;
 use image::docker::archive::DockerArchiveResolver;
 use image::docker::engine::DockerEngineResolver;
 use image::oci::layout::OciLayoutResolver;
+use image::registry::RegistryResolver;
 use image::resolver::Resolver;
 use image::Image;
 
@@ -88,10 +89,7 @@ async fn resolve_image(uri: &str) -> anyhow::Result<Image> {
     } else if uri.starts_with("oci://") {
         OciLayoutResolver::new().fetch(uri).await
     } else if uri.starts_with("registry://") {
-        anyhow::bail!(
-            "Registry resolver is not yet implemented (coming in Phase 10). \
-             Use docker://, docker-archive://path/to/image.tar, or oci://path/to/layout instead."
-        )
+        RegistryResolver::new().fetch(uri).await
     } else if uri.starts_with("podman://") {
         anyhow::bail!(
             "Podman resolver is not yet implemented (coming in Phase 11). \

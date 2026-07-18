@@ -42,7 +42,7 @@ struct DockerManifest {
 }
 
 #[derive(Deserialize)]
-struct HistoryEntry {
+pub struct HistoryEntry {
     #[serde(default)]
     created_by: Option<String>,
     #[serde(default)]
@@ -50,9 +50,9 @@ struct HistoryEntry {
 }
 
 #[derive(Deserialize)]
-struct ImageConfig {
+pub struct ImageConfig {
     #[serde(default)]
-    history: Vec<HistoryEntry>,
+    pub history: Vec<HistoryEntry>,
 }
 
 #[derive(Deserialize)]
@@ -82,13 +82,13 @@ struct OciDescriptor {
     digest: String,
 }
 
-struct LayerSource {
-    data: Result<Vec<u8>>,
-    id: Option<String>,
-    digest: Option<String>,
+pub struct LayerSource {
+    pub data: Result<Vec<u8>>,
+    pub id: Option<String>,
+    pub digest: Option<String>,
 }
 
-fn build_layers(
+pub fn build_layers(
     config: &ImageConfig,
     layer_sources: impl Iterator<Item = LayerSource>,
     tags: &[String],

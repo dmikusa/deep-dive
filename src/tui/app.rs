@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_quit_binding() {
-        let mut state = test_state();
+        let state = test_state();
         assert!(state
             .config
             .key_matches("quit", key(KeyCode::Char('q'), false)));
