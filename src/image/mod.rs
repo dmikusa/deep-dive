@@ -83,3 +83,44 @@ pub async fn resolve_with_progress(
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cwd() -> String {
+        std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn test_resolve_docker_archive_fixture() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let uri = format!(
+            "docker-archive://{}/tests/fixtures/test-docker-image.tar",
+            cwd()
+        );
+        let image = resolve_with_progress(&uri, tx).await.unwrap();
+        assert_eq!(image.reference, uri);
+        assert!(!image.layers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_resolve_oci_layout_fixture() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let uri = format!("oci://{}/tests/fixtures/test-oci-gzip-image.tar", cwd());
+        let image = resolve_with_progress(&uri, tx).await.unwrap();
+        assert_eq!(image.reference, uri);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_unsupported_scheme() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let err = resolve_with_progress("ftp://example.com", tx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Unsupported image URI"));
+    }
+}

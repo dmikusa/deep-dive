@@ -41,3 +41,23 @@ impl Drop for Loader {
         self.stop();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_loader_starts_and_stops() {
+        let mut loader = Loader::new("loading");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        loader.stop();
+        assert!(loader.handle.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_loader_drop_stops_task() {
+        let loader = Loader::new("loading");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(loader);
+    }
+}

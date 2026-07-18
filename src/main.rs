@@ -83,4 +83,31 @@ mod tests {
         assert!(!is_docker_uri("docker-archive://image.tar"));
         assert!(!is_docker_uri("oci://layout"));
     }
+
+    #[test]
+    fn test_init_tracing_sets_filter() {
+        let args = Cli {
+            image: "test".into(),
+            config: None,
+            verbose: 0,
+            quiet: false,
+        };
+        init_tracing(&args);
+
+        let args = Cli {
+            image: "test".into(),
+            config: None,
+            verbose: 2,
+            quiet: false,
+        };
+        init_tracing(&args);
+
+        let args = Cli {
+            image: "test".into(),
+            config: None,
+            verbose: 0,
+            quiet: true,
+        };
+        init_tracing(&args);
+    }
 }

@@ -45,3 +45,43 @@ pub trait Resolver {
 pub fn is_docker_uri(uri: &str) -> bool {
     uri.starts_with("docker://") || !uri.contains("://")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::image::progress::Progress;
+    use crate::image::Image;
+
+    struct TestResolver;
+
+    #[async_trait]
+    impl Resolver for TestResolver {
+        async fn fetch(&self, image_ref: &str) -> anyhow::Result<Image> {
+            Ok(Image {
+                reference: image_ref.to_string(),
+                layers: Vec::new(),
+            })
+        }
+
+        fn source_type(&self) -> ImageSource {
+            ImageSource::Docker
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_with_progress_reports_status() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
+        let resolver = TestResolver;
+        let image = resolver.fetch_with_progress("test", tx).await.unwrap();
+        assert_eq!(image.reference, "test");
+        assert!(matches!(rx.recv().await, Some(Progress::Status(_))));
+    }
+
+    #[test]
+    fn test_is_docker_uri() {
+        assert!(is_docker_uri("docker://alpine"));
+        assert!(is_docker_uri("alpine:latest"));
+        assert!(!is_docker_uri("docker-archive://image.tar"));
+        assert!(!is_docker_uri("oci://layout"));
+    }
+}

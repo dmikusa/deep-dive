@@ -33,3 +33,48 @@ impl StatusBarWidget {
         frame.render_widget(paragraph, area);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    use crate::image::Image;
+    use crate::tui::state::AppState;
+
+    #[test]
+    fn test_status_bar_renders() {
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let state = AppState::new(Image {
+            reference: "test".into(),
+            layers: Vec::new(),
+        });
+        terminal
+            .draw(|f| StatusBarWidget::render(f, f.area(), &state))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(content.contains("layer") || content.contains("q quit"));
+    }
+
+    #[test]
+    fn test_status_bar_shows_message() {
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut state = AppState::new(Image {
+            reference: "test".into(),
+            layers: Vec::new(),
+        });
+        state.status_message = Some("saved".into());
+        terminal
+            .draw(|f| StatusBarWidget::render(f, f.area(), &state))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(content.contains("saved"));
+    }
+}
