@@ -14,6 +14,7 @@ Before working on any task, read the plan document to understand:
 - **Lint**: `cargo clippy -- -D warnings`
 - **Format**: `cargo fmt`
 - **Run**: `cargo run -- <image-uri>`
+- **Coverage**: `mkdir -p target/coverage && cargo llvm-cov --lcov --output-path target/coverage/lcov.info`
 
 ## Process Rules
 

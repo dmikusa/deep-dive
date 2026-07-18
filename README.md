@@ -205,7 +205,7 @@ cargo clippy -- -D warnings
 cargo fmt
 
 # Coverage
-cargo llvm-cov --lcov --output-path lcov.info
+mkdir -p target/coverage && cargo llvm-cov --lcov --output-path target/coverage/lcov.info
 ```
 
 ## License

@@ -2,5 +2,3 @@
 Cargo.lock.bak
 /dive
 deep-dive.log
-lcov.info
-/coverage_html
