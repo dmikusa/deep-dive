@@ -1,11 +1,11 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::Deserialize;
+
+use crate::utils::expand_tilde;
 
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct Config {
@@ -81,8 +81,12 @@ impl Config {
     }
 
     /// Return the configured default directory for extractions, if any.
-    pub fn extract_default_directory(&self) -> Option<&str> {
-        self.extract.default_directory.as_deref()
+    /// Tilde (`~`) is expanded to the user's home directory.
+    pub fn extract_default_directory(&self) -> Option<PathBuf> {
+        self.extract
+            .default_directory
+            .as_deref()
+            .and_then(expand_tilde)
     }
 }
 
@@ -227,5 +231,24 @@ extract:
         std::fs::write(&path, "show_attributes: true\n").unwrap();
         let config = Config::load(Some(&path)).unwrap();
         assert_eq!(config.show_attributes, Some(true));
+    }
+
+    #[test]
+    fn test_extract_default_directory_expands_tilde() {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .expect("HOME or USERPROFILE must be set");
+        let mut config = Config::default();
+        config.extract.default_directory = Some("~/Downloads".to_string());
+        assert_eq!(
+            config.extract_default_directory(),
+            Some(PathBuf::from(&home).join("Downloads"))
+        );
+    }
+
+    #[test]
+    fn test_extract_default_directory_missing() {
+        let config = Config::default();
+        assert!(config.extract_default_directory().is_none());
     }
 }

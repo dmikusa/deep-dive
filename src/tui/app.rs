@@ -17,6 +17,7 @@ use crate::tui::widgets::filter::FilterWidget;
 use crate::tui::widgets::image_details::ImageDetailsWidget;
 use crate::tui::widgets::layer_details::LayerDetailsWidget;
 use crate::tui::widgets::layer_list::LayerListWidget;
+use crate::tui::widgets::modal::ModalWidget;
 use crate::tui::widgets::status_bar::StatusBarWidget;
 
 pub async fn run(image: Image, report: Report, config: Config) -> Result<()> {
@@ -41,6 +42,11 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, state: &mut AppState) -
 
         if let Event::Key(key) = event {
             if key.kind == KeyEventKind::Press {
+                if state.is_modal_active() {
+                    handle_modal_key(state, key, &mut comparer);
+                    continue;
+                }
+
                 if state.is_filter_active {
                     handle_filter_key(state, key);
                     continue;
@@ -149,7 +155,7 @@ fn handle_file_tree_keys<B: Backend>(
         state.page_down(&tree, page_height(terminal));
     } else if state.config.key_matches("extract", key) {
         let tree = current_tree(state, comparer);
-        if let Err(e) = state.extract_selected(&tree) {
+        if let Err(e) = state.open_extract_modal(&tree) {
             state.status_message = Some(format!("Extract failed: {}", e));
         }
     } else if state.config.key_matches("toggle_diff_added", key) {
@@ -182,6 +188,21 @@ fn handle_filter_key(state: &mut AppState, key: event::KeyEvent) {
         state.pop_filter_char();
     } else if let event::KeyCode::Char(c) = key.code {
         state.push_filter_char(c);
+    }
+}
+
+fn handle_modal_key(state: &mut AppState, key: event::KeyEvent, comparer: &mut Comparer) {
+    if key.code == event::KeyCode::Esc {
+        state.cancel_modal();
+    } else if key.code == event::KeyCode::Enter {
+        let tree = current_tree(state, comparer);
+        if let Err(e) = state.confirm_extract_modal(&tree) {
+            state.status_message = Some(format!("Extract failed: {}", e));
+        }
+    } else if key.code == event::KeyCode::Backspace {
+        state.pop_modal_char();
+    } else if let event::KeyCode::Char(c) = key.code {
+        state.push_modal_char(c);
     }
 }
 
@@ -221,6 +242,10 @@ fn ui(frame: &mut ratatui::Frame, state: &mut AppState, comparer: &mut Comparer)
         FilterWidget::render(frame, main_layout[1], state);
     }
     StatusBarWidget::render(frame, main_layout[2], state);
+
+    if state.is_modal_active() {
+        ModalWidget::render(frame, frame.area(), state);
+    }
 }
 
 fn current_tree(state: &AppState, comparer: &mut Comparer) -> crate::analysis::filetree::FileTree {

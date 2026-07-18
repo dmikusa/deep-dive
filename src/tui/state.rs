@@ -1,15 +1,16 @@
 #![allow(dead_code)]
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use regex::Regex;
 
-use crate::analysis::filetree::{DiffType, FileTree, SortMode};
+use crate::analysis::filetree::{DiffType, FileTree, SortMode, TarEntryType};
 use crate::analysis::report::Report;
 use crate::config::Config;
 use crate::image::Image;
+use crate::utils::expand_tilde;
 
 /// Display data for a single layer in the layer list.
 #[derive(Debug, Clone)]
@@ -65,6 +66,17 @@ pub enum CompareMode {
     Aggregated,
 }
 
+/// Modal overlay state for the TUI.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ModalState {
+    #[default]
+    None,
+    ExtractTo {
+        destination: String,
+        original_path: String,
+    },
+}
+
 /// Mutable application state for the TUI.
 #[derive(Debug)]
 pub struct AppState {
@@ -84,6 +96,7 @@ pub struct AppState {
     pub wrap_tree: bool,
     pub status_message: Option<String>,
     pub report: Option<Report>,
+    pub modal: ModalState,
 }
 
 impl AppState {
@@ -135,6 +148,7 @@ impl AppState {
             wrap_tree: config.wrap_tree.unwrap_or(false),
             status_message: None,
             report: None,
+            modal: ModalState::default(),
         }
     }
 
@@ -316,47 +330,47 @@ impl AppState {
         self.collapsed_paths.clear();
     }
 
-    pub fn extract_selected(&mut self, tree: &FileTree) -> Result<()> {
+    pub fn extract_selected_to(&mut self, tree: &FileTree, dest: impl AsRef<Path>) -> Result<()> {
         let path = self
             .selected_tree_path
             .as_ref()
             .context("no file selected")?;
         let node = tree.get_node(path).context("selected node not found")?;
+        let target = resolve_extract_destination(dest.as_ref(), path)?;
 
         match node.info.entry_type {
-            crate::analysis::filetree::TarEntryType::Regular => {
-                let target = Path::new(path);
+            TarEntryType::Regular => {
                 if let Some(parent) = target.parent() {
                     std::fs::create_dir_all(parent)
                         .with_context(|| format!("failed to create directory {:?}", parent))?;
                 }
-                std::fs::write(target, &node.info.content)
-                    .with_context(|| format!("failed to write {}", path))?;
-                self.status_message = Some(format!("Extracted {}", path));
+                std::fs::write(&target, &node.info.content)
+                    .with_context(|| format!("failed to write {}", target.display()))?;
+                self.status_message = Some(format!("Extracted {}", target.display()));
             }
-            crate::analysis::filetree::TarEntryType::Symlink => {
-                let target = Path::new(path);
+            TarEntryType::Symlink => {
                 if let Some(parent) = target.parent() {
                     std::fs::create_dir_all(parent)
                         .with_context(|| format!("failed to create directory {:?}", parent))?;
                 }
                 #[cfg(unix)]
                 {
-                    std::os::unix::fs::symlink(&node.info.linkname, target)
-                        .with_context(|| format!("failed to create symlink {}", path))?;
-                    self.status_message = Some(format!("Extracted symlink {}", path));
+                    std::os::unix::fs::symlink(&node.info.linkname, &target).with_context(
+                        || format!("failed to create symlink {}", target.display()),
+                    )?;
+                    self.status_message = Some(format!("Extracted symlink {}", target.display()));
                 }
                 #[cfg(not(unix))]
                 {
                     anyhow::bail!("symlink extraction is not supported on this platform");
                 }
             }
-            crate::analysis::filetree::TarEntryType::Hardlink => {
+            TarEntryType::Hardlink => {
                 anyhow::bail!("cannot extract {}: hardlinks are not supported yet", path);
             }
             other => {
                 anyhow::bail!(
-                    "cannot extract {}: selected node is a {} (not a regular file)",
+                    "cannot extract {}: selected node is a {} (not a file or symlink)",
                     path,
                     format!("{:?}", other).to_lowercase()
                 );
@@ -366,15 +380,103 @@ impl AppState {
         Ok(())
     }
 
+    pub fn open_extract_modal(&mut self, tree: &FileTree) -> Result<()> {
+        let path = self
+            .selected_tree_path
+            .as_ref()
+            .context("no file selected")?;
+        let node = tree.get_node(path).context("selected node not found")?;
+        if !matches!(
+            node.info.entry_type,
+            TarEntryType::Regular | TarEntryType::Symlink
+        ) {
+            anyhow::bail!(
+                "cannot extract {}: selected node is not a file or symlink",
+                path
+            );
+        }
+
+        let default = self
+            .config
+            .extract_default_directory()
+            .or_else(|| std::env::current_dir().ok())
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string());
+
+        self.modal = ModalState::ExtractTo {
+            destination: default,
+            original_path: path.clone(),
+        };
+        Ok(())
+    }
+
+    pub fn confirm_extract_modal(&mut self, tree: &FileTree) -> Result<()> {
+        if let ModalState::ExtractTo {
+            ref destination, ..
+        } = self.modal
+        {
+            let dest = expand_tilde(destination).context("invalid destination path")?;
+            self.extract_selected_to(tree, &dest)?;
+        }
+        self.modal = ModalState::None;
+        Ok(())
+    }
+
+    pub fn cancel_modal(&mut self) {
+        self.modal = ModalState::None;
+    }
+
+    pub fn is_modal_active(&self) -> bool {
+        !matches!(self.modal, ModalState::None)
+    }
+
+    pub fn modal_destination(&self) -> Option<&str> {
+        match &self.modal {
+            ModalState::ExtractTo { destination, .. } => Some(destination),
+            ModalState::None => None,
+        }
+    }
+
+    pub fn push_modal_char(&mut self, c: char) {
+        if let ModalState::ExtractTo { destination, .. } = &mut self.modal {
+            destination.push(c);
+        }
+    }
+
+    pub fn pop_modal_char(&mut self) {
+        if let ModalState::ExtractTo { destination, .. } = &mut self.modal {
+            destination.pop();
+        }
+    }
+
     pub fn clear_status_message(&mut self) {
         self.status_message = None;
+    }
+}
+
+/// Resolve the destination path for an extraction.
+///
+/// If `dest` ends with a path separator or exists as a directory, the image's
+/// relative path is preserved inside `dest`. Otherwise `dest` is treated as the
+/// exact output path.
+fn resolve_extract_destination(dest: &Path, image_path: &str) -> Result<PathBuf> {
+    let dest_str = dest.to_string_lossy();
+    let is_dir_target = dest_str.ends_with(std::path::MAIN_SEPARATOR)
+        || dest_str.ends_with('/')
+        || dest_str.ends_with('\\')
+        || dest.is_dir();
+
+    if is_dir_target {
+        Ok(dest.join(image_path))
+    } else {
+        Ok(dest.to_path_buf())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::filetree::{FileInfo, TarEntryType};
+    use crate::analysis::filetree::FileInfo;
 
     fn empty_image() -> Image {
         Image {
@@ -592,24 +694,35 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_selected_writes_file() {
+    fn test_extract_selected_to_directory() {
         let mut tree = FileTree::new();
         let mut info = file_info(0, 1);
         info.content = b"hello world".to_vec();
         tree.add_path("dir/file.txt", info);
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&temp_dir).unwrap();
-
         let mut state = AppState::new(empty_image());
         state.selected_tree_path = Some("dir/file.txt".to_string());
-        let result = state.extract_selected(&tree);
-
-        std::env::set_current_dir(&original_dir).unwrap();
-        result.unwrap();
+        state.extract_selected_to(&tree, temp_dir.path()).unwrap();
 
         let written = std::fs::read(temp_dir.path().join("dir/file.txt")).unwrap();
+        assert_eq!(written, b"hello world");
+    }
+
+    #[test]
+    fn test_extract_selected_to_file_path() {
+        let mut tree = FileTree::new();
+        let mut info = file_info(0, 1);
+        info.content = b"hello world".to_vec();
+        tree.add_path("dir/file.txt", info);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let output = temp_dir.path().join("renamed.txt");
+        let mut state = AppState::new(empty_image());
+        state.selected_tree_path = Some("dir/file.txt".to_string());
+        state.extract_selected_to(&tree, &output).unwrap();
+
+        let written = std::fs::read(&output).unwrap();
         assert_eq!(written, b"hello world");
     }
 
@@ -618,9 +731,112 @@ mod tests {
         let mut tree = FileTree::new();
         tree.add_path("dir", dir_info());
 
+        let temp_dir = tempfile::tempdir().unwrap();
         let mut state = AppState::new(empty_image());
         state.selected_tree_path = Some("dir".to_string());
-        assert!(state.extract_selected(&tree).is_err());
+        assert!(state.extract_selected_to(&tree, temp_dir.path()).is_err());
+    }
+
+    #[test]
+    fn test_resolve_extract_destination_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = resolve_extract_destination(dir.path(), "a/b.txt").unwrap();
+        assert_eq!(dest, dir.path().join("a/b.txt"));
+    }
+
+    #[test]
+    fn test_resolve_extract_destination_trailing_separator() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest =
+            resolve_extract_destination(dir.path().join("out").as_path(), "a/b.txt").unwrap();
+        // Without trailing separator and path doesn't exist, treat as file.
+        assert_eq!(dest, dir.path().join("out"));
+    }
+
+    #[test]
+    fn test_resolve_extract_destination_exact_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("renamed.txt");
+        let dest = resolve_extract_destination(&file, "a/b.txt").unwrap();
+        assert_eq!(dest, file);
+    }
+
+    #[test]
+    fn test_modal_open_and_cancel() {
+        let mut tree = FileTree::new();
+        let mut info = file_info(0, 1);
+        info.content = b"hello".to_vec();
+        tree.add_path("file.txt", info);
+
+        let mut state = AppState::new(empty_image());
+        state.selected_tree_path = Some("file.txt".to_string());
+        state.open_extract_modal(&tree).unwrap();
+        assert!(state.is_modal_active());
+        assert!(state.modal_destination().is_some());
+
+        state.cancel_modal();
+        assert!(!state.is_modal_active());
+    }
+
+    #[test]
+    fn test_modal_typing() {
+        let mut tree = FileTree::new();
+        let mut info = file_info(0, 1);
+        info.content = b"hello".to_vec();
+        tree.add_path("file.txt", info);
+
+        let mut state = AppState::new(empty_image());
+        state.selected_tree_path = Some("file.txt".to_string());
+        state.open_extract_modal(&tree).unwrap();
+        state.push_modal_char('/');
+        state.push_modal_char('t');
+        state.push_modal_char('o');
+        state.pop_modal_char();
+        assert!(state.modal_destination().unwrap().contains("/t"));
+    }
+
+    #[test]
+    fn test_modal_confirm_extract() {
+        let mut tree = FileTree::new();
+        let mut info = file_info(0, 1);
+        info.content = b"hello world".to_vec();
+        tree.add_path("dir/file.txt", info);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut state = AppState::new(empty_image());
+        state.selected_tree_path = Some("dir/file.txt".to_string());
+        state.open_extract_modal(&tree).unwrap();
+        state.modal = ModalState::ExtractTo {
+            destination: temp_dir.path().to_string_lossy().to_string(),
+            original_path: "dir/file.txt".to_string(),
+        };
+        state.confirm_extract_modal(&tree).unwrap();
+
+        assert!(!state.is_modal_active());
+        let written = std::fs::read(temp_dir.path().join("dir/file.txt")).unwrap();
+        assert_eq!(written, b"hello world");
+        assert!(state.status_message.as_ref().unwrap().contains("Extracted"));
+    }
+
+    #[test]
+    fn test_extract_modal_defaults_to_config_directory() {
+        let mut config = Config::default();
+        let dir = tempfile::tempdir().unwrap();
+        config.extract.default_directory = Some(dir.path().to_string_lossy().to_string());
+
+        let mut tree = FileTree::new();
+        let mut info = file_info(0, 1);
+        info.content = b"x".to_vec();
+        tree.add_path("file.txt", info);
+
+        let mut state = AppState::with_config(empty_image(), config);
+        state.selected_tree_path = Some("file.txt".to_string());
+        state.open_extract_modal(&tree).unwrap();
+
+        assert_eq!(
+            PathBuf::from(state.modal_destination().unwrap()),
+            dir.path()
+        );
     }
 
     fn file_info(size: u64, content_hash: u64) -> FileInfo {
