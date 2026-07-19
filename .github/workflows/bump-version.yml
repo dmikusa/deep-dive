@@ -17,14 +17,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
       - name: Validate semver
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "Invalid semver: ${{ inputs.version }}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "Invalid semver: $VERSION"
             exit 1
           fi
       - name: Update Cargo.toml version
-        run: sed -i 's/^version = .*/version = "${{ inputs.version }}"/' Cargo.toml
+        env:
+          VERSION: ${{ inputs.version }}
+        run: sed -i 's/^version = .*/version = "$VERSION"/' Cargo.toml
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
