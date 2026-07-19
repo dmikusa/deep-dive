@@ -63,7 +63,7 @@ async fn run_loop<B: Backend>(
     Ok(())
 }
 
-async fn run_loading<B: Backend>(
+async fn run_loading<B: Backend + Send + Sync>(
     terminal: &mut Terminal<B>,
     image_ref: &str,
     analyzers: &[Box<dyn Analyzer>],
@@ -123,7 +123,7 @@ async fn run_loading<B: Backend>(
     }
 }
 
-async fn run_app<B: Backend>(
+async fn run_app<B: Backend + Send + Sync>(
     terminal: &mut Terminal<B>,
     image: Image,
     report: Report,
