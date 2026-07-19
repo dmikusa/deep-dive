@@ -25,6 +25,12 @@ how much space was used, and where bytes are wasted. It is a Rust rewrite of
 
 ## Installation
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install dmikusa/tap/deep-dive
+```
+
 ### Pre-built binaries
 
 Download the latest release for your platform from the
