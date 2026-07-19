@@ -140,10 +140,7 @@ impl FileTree {
         let mut current = &self.root;
 
         for part in parts {
-            match current.children.get(part) {
-                Some(node) => current = node,
-                None => return None,
-            }
+            current = current.children.get(part)?;
         }
 
         Some(current)
@@ -159,10 +156,7 @@ impl FileTree {
         let mut current = &mut self.root;
 
         for part in parts {
-            match current.children.get_mut(part) {
-                Some(node) => current = node,
-                None => return None,
-            }
+            current = current.children.get_mut(part)?;
         }
 
         Some(current)
