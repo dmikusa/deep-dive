@@ -43,12 +43,15 @@ pub async fn run(
     result
 }
 
-async fn run_loop<B: Backend + Send + Sync>(
+async fn run_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     mut image_ref: String,
     analyzers: Vec<Box<dyn Analyzer>>,
     config: Config,
-) -> Result<()> {
+) -> Result<()>
+where
+    <B as Backend>::Error: Send + Sync + 'static,
+{
     loop {
         let (image, report) = run_loading(terminal, &image_ref, &analyzers, &config).await?;
         let action = run_app(terminal, image, report, config.clone()).await?;
@@ -63,12 +66,15 @@ async fn run_loop<B: Backend + Send + Sync>(
     Ok(())
 }
 
-async fn run_loading<B: Backend + Send + Sync>(
+async fn run_loading<B: Backend>(
     terminal: &mut Terminal<B>,
     image_ref: &str,
     analyzers: &[Box<dyn Analyzer>],
     config: &Config,
-) -> Result<(Image, Report)> {
+) -> Result<(Image, Report)>
+where
+    <B as Backend>::Error: Send + Sync + 'static,
+{
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<Progress>(32);
     let status_ref = image_ref.to_string();
     let image_ref = image_ref.to_string();
@@ -123,12 +129,15 @@ async fn run_loading<B: Backend + Send + Sync>(
     }
 }
 
-async fn run_app<B: Backend + Send + Sync>(
+async fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
     image: Image,
     report: Report,
     config: Config,
-) -> Result<AppAction> {
+) -> Result<AppAction>
+where
+    <B as Backend>::Error: Send + Sync + 'static,
+{
     let mut state = AppState::with_config(image, config);
     state.report = Some(report);
     let mut comparer = Comparer::new(state.image.layers.clone());
