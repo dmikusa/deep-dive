@@ -43,7 +43,7 @@ pub async fn run(
     result
 }
 
-async fn run_loop<B: Backend>(
+async fn run_loop<B: Backend + Send + Sync>(
     terminal: &mut Terminal<B>,
     mut image_ref: String,
     analyzers: Vec<Box<dyn Analyzer>>,
