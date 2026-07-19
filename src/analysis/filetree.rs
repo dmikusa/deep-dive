@@ -981,10 +981,14 @@ mod tests {
         tree.get_node_mut("var").unwrap().diff_type = DiffType::Added;
         tree.get_node_mut("var/cache").unwrap().diff_type = DiffType::Added;
         tree.get_node_mut("var/cache/apt").unwrap().diff_type = DiffType::Added;
-        tree.get_node_mut("var/cache/apt/archives").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/cache/apt/archives")
+            .unwrap()
+            .diff_type = DiffType::Added;
         tree.get_node_mut("var/lib").unwrap().diff_type = DiffType::Added;
         tree.get_node_mut("var/lib/apt").unwrap().diff_type = DiffType::Added;
-        tree.get_node_mut("var/lib/apt/extended_states").unwrap().diff_type = DiffType::Added;
+        tree.get_node_mut("var/lib/apt/extended_states")
+            .unwrap()
+            .diff_type = DiffType::Added;
 
         let mut hidden = HashSet::new();
         hidden.insert(DiffType::Added);

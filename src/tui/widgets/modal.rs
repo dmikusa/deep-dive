@@ -75,16 +75,13 @@ impl ModalWidget {
     }
 
     fn sanitize_value(value: &str) -> String {
-        let ansi_stripped =
-            regex::Regex::new(r"\x1B\[[0-9;]*[A-Za-z]")
-                .unwrap()
-                .replace_all(value, "");
+        let ansi_stripped = regex::Regex::new(r"\x1B\[[0-9;]*[A-Za-z]")
+            .unwrap()
+            .replace_all(value, "");
         let tab_replaced = ansi_stripped.replace('\t', " ");
         tab_replaced
             .chars()
-            .filter(|ch| {
-                !ch.is_control() || *ch == '\n'
-            })
+            .filter(|ch| !ch.is_control() || *ch == '\n')
             .collect()
     }
 

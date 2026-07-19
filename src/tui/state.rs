@@ -520,8 +520,7 @@ impl AppState {
     pub fn detail_field_value(&self) -> Option<String> {
         match &self.modal {
             ModalState::DetailField { label } => {
-                let fields =
-                    crate::tui::widgets::layer_details::LayerDetailsWidget::fields(self);
+                let fields = crate::tui::widgets::layer_details::LayerDetailsWidget::fields(self);
                 fields
                     .iter()
                     .find(|f| f.label == label.as_str())
