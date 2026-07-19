@@ -7,6 +7,11 @@ Before working on any task, read the plan document to understand:
 - The current phase of implementation
 - The process rules for phase completion
 
+## Rules
+
+1. Never push/merge to `main` directly. Always use a pull request.
+2. You are not authorized to merge PRs. Only the human can merge.
+
 ## Quick Reference
 
 - **Build**: `cargo build`
