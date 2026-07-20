@@ -12,6 +12,7 @@ mod utils;
 
 use analysis::analyzers::efficiency::EfficiencyAnalyzer;
 use analysis::analyzers::layer_stats::LayerStatsAnalyzer;
+use analysis::analyzers::shaded::ShadedFileAnalyzer;
 use analysis::report::Analyzer;
 use cli::Cli;
 use config::Config;
@@ -27,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
     let analyzers: Vec<Box<dyn Analyzer>> = vec![
         Box::new(EfficiencyAnalyzer),
         Box::new(LayerStatsAnalyzer),
+        Box::new(ShadedFileAnalyzer),
     ];
 
     tui::app::run(args.image, analyzers, config).await

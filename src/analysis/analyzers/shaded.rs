@@ -168,14 +168,13 @@ impl Analyzer for ShadedFileAnalyzer {
                 }
 
                 let size = layer.tree.subtree_size(&path);
-                file_occurrences
-                    .entry(path.clone())
-                    .or_default()
-                    .push(FileOccurrence {
+                file_occurrences.entry(path.clone()).or_default().push(
+                    FileOccurrence {
                         layer_index: layer.index,
                         size,
                         content_hash: node.info.content_hash,
-                    });
+                    },
+                );
             }
         }
 
@@ -190,15 +189,15 @@ impl Analyzer for ShadedFileAnalyzer {
 
             let has_whiteout_above = whiteout_layers
                 .get(&path)
-                .map(|wos| {
-                    wos.iter()
-                        .any(|wo| wo.layer_index > files.last().unwrap().layer_index)
-                })
+                .map(|wos| wos.iter().any(|wo| wo.layer_index > files.last().unwrap().layer_index))
                 .unwrap_or(false);
 
             let deleted_by_whiteout = has_whiteout_above;
 
-            let total_wasted: u64 = files[..files.len() - 1].iter().map(|o| o.size).sum();
+            let total_wasted: u64 = files[..files.len() - 1]
+                .iter()
+                .map(|o| o.size)
+                .sum();
 
             let visible = files.last().unwrap();
             let content_identical = files.iter().all(|o| o.content_hash == visible.content_hash);
@@ -270,7 +269,10 @@ mod tests {
 
         let analyzer = ShadedFileAnalyzer;
         let result = analyzer.analyze(&image).unwrap();
-        let shaded = result.as_any().downcast_ref::<ShadedFileResult>().unwrap();
+        let shaded = result
+            .as_any()
+            .downcast_ref::<ShadedFileResult>()
+            .unwrap();
         assert_eq!(shaded.shaded_file_count, 0);
         assert_eq!(shaded.total_shaded_bytes, 0);
     }
@@ -292,7 +294,10 @@ mod tests {
 
         let analyzer = ShadedFileAnalyzer;
         let result = analyzer.analyze(&image).unwrap();
-        let shaded = result.as_any().downcast_ref::<ShadedFileResult>().unwrap();
+        let shaded = result
+            .as_any()
+            .downcast_ref::<ShadedFileResult>()
+            .unwrap();
         assert_eq!(shaded.shaded_file_count, 1);
         assert_eq!(shaded.total_shaded_bytes, 100);
 
@@ -321,7 +326,10 @@ mod tests {
 
         let analyzer = ShadedFileAnalyzer;
         let result = analyzer.analyze(&image).unwrap();
-        let shaded = result.as_any().downcast_ref::<ShadedFileResult>().unwrap();
+        let shaded = result
+            .as_any()
+            .downcast_ref::<ShadedFileResult>()
+            .unwrap();
         assert_eq!(shaded.shaded_file_count, 1);
         assert_eq!(shaded.total_shaded_bytes, 100);
         assert!(shaded.shaded_files[0].content_identical);
@@ -347,7 +355,10 @@ mod tests {
 
         let analyzer = ShadedFileAnalyzer;
         let result = analyzer.analyze(&image).unwrap();
-        let shaded = result.as_any().downcast_ref::<ShadedFileResult>().unwrap();
+        let shaded = result
+            .as_any()
+            .downcast_ref::<ShadedFileResult>()
+            .unwrap();
         assert_eq!(shaded.shaded_file_count, 1);
         assert_eq!(shaded.total_shaded_bytes, 250);
 
@@ -378,7 +389,10 @@ mod tests {
 
         let analyzer = ShadedFileAnalyzer;
         let result = analyzer.analyze(&image).unwrap();
-        let shaded = result.as_any().downcast_ref::<ShadedFileResult>().unwrap();
+        let shaded = result
+            .as_any()
+            .downcast_ref::<ShadedFileResult>()
+            .unwrap();
         assert_eq!(shaded.shaded_file_count, 1);
         assert_eq!(shaded.total_shaded_bytes, 100);
 
@@ -408,7 +422,10 @@ mod tests {
 
         let analyzer = ShadedFileAnalyzer;
         let result = analyzer.analyze(&image).unwrap();
-        let shaded = result.as_any().downcast_ref::<ShadedFileResult>().unwrap();
+        let shaded = result
+            .as_any()
+            .downcast_ref::<ShadedFileResult>()
+            .unwrap();
         assert_eq!(shaded.shaded_file_count, 1);
         assert_eq!(shaded.shaded_files[0].path, "shared");
     }
@@ -421,7 +438,10 @@ mod tests {
 
         let analyzer = ShadedFileAnalyzer;
         let result = analyzer.analyze(&image).unwrap();
-        let shaded = result.as_any().downcast_ref::<ShadedFileResult>().unwrap();
+        let shaded = result
+            .as_any()
+            .downcast_ref::<ShadedFileResult>()
+            .unwrap();
 
         assert!(!shaded.shaded_files.is_empty());
         assert!(shaded.total_shaded_bytes > 0);
