@@ -28,3 +28,4 @@ Before working on any task, read the plan document to understand:
 3. Each phase ends with a single git commit
 4. No work may be deferred without explicit human confirmation
 5. After completing a phase, present a review to the human before proceeding
+6. Before every commit and push, run `cargo fmt` then `cargo clippy -- -D warnings` and ensure both pass clean
