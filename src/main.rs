@@ -11,6 +11,7 @@ mod tui;
 mod utils;
 
 use analysis::analyzers::efficiency::EfficiencyAnalyzer;
+use analysis::analyzers::layer_stats::LayerStatsAnalyzer;
 use analysis::report::Analyzer;
 use cli::Cli;
 use config::Config;
@@ -23,7 +24,10 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("deep-dive starting for image: {}", args.image);
 
     let config = Config::load(args.config.as_deref())?;
-    let analyzers: Vec<Box<dyn Analyzer>> = vec![Box::new(EfficiencyAnalyzer)];
+    let analyzers: Vec<Box<dyn Analyzer>> = vec![
+        Box::new(EfficiencyAnalyzer),
+        Box::new(LayerStatsAnalyzer),
+    ];
 
     tui::app::run(args.image, analyzers, config).await
 }
