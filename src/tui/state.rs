@@ -104,6 +104,7 @@ pub struct AppState {
     pub report: Option<Report>,
     pub modal: ModalState,
     pub selected_detail_field: usize,
+    pub image_details_scroll: usize,
 }
 
 impl AppState {
@@ -157,6 +158,7 @@ impl AppState {
             report: None,
             modal: ModalState::default(),
             selected_detail_field: 0,
+            image_details_scroll: 0,
         }
     }
 
@@ -530,8 +532,33 @@ impl AppState {
         }
     }
 
+    /// Get the layer stats for the currently selected layer, if available from the report.
+    pub fn layer_stats_for_current_layer(
+        &self,
+    ) -> Option<&crate::analysis::analyzers::layer_stats::LayerStats> {
+        let report = self.report.as_ref()?;
+        for result in &report.results {
+            if result.analyzer_name() == "Layer Stats" {
+                let stats = result
+                    .as_any()
+                    .downcast_ref::<crate::analysis::analyzers::layer_stats::LayerStatsResult>(
+                )?;
+                return stats.layers.iter().find(|l| l.index == self.selected_layer);
+            }
+        }
+        None
+    }
+
     pub fn clear_status_message(&mut self) {
         self.status_message = None;
+    }
+
+    pub fn scroll_image_details_up(&mut self) {
+        self.image_details_scroll = self.image_details_scroll.saturating_sub(1);
+    }
+
+    pub fn scroll_image_details_down(&mut self) {
+        self.image_details_scroll = self.image_details_scroll.saturating_add(1);
     }
 }
 

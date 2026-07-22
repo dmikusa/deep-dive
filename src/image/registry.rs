@@ -11,7 +11,7 @@ use oci_client::{Client, Reference};
 use serde::Deserialize;
 
 use crate::analysis::archive::{build_layers, ImageConfig, LayerSource};
-use crate::image::progress::{status, ProgressSender};
+use crate::image::progress::{bytes, status, ProgressSender};
 use crate::image::resolver::{ImageSource, Resolver};
 use crate::image::Image;
 
@@ -142,6 +142,8 @@ impl RegistryResolver {
     ) -> Result<Vec<crate::image::Layer>> {
         let mut layer_sources = Vec::with_capacity(manifest.layers.len());
         let total = manifest.layers.len();
+        let total_bytes: u64 = manifest.layers.iter().map(|l| l.size.max(0) as u64).sum();
+        let mut bytes_received: u64 = 0;
 
         for (i, layer) in manifest.layers.iter().enumerate() {
             let digest = layer.digest.clone();
@@ -152,13 +154,17 @@ impl RegistryResolver {
                 )
                 .await;
             }
-            let mut data = Vec::new();
+            let mut data = Vec::with_capacity(layer.size.max(0) as usize);
             self.client
                 .pull_blob(reference, layer.digest.as_str(), &mut data)
                 .await
                 .with_context(|| {
                     format!("failed to pull layer {} ({}) for {}", i, digest, reference)
                 })?;
+            bytes_received += layer.size.max(0) as u64;
+            if let Some(p) = progress {
+                bytes(p, bytes_received, Some(total_bytes)).await;
+            }
             layer_sources.push(LayerSource {
                 data: Ok(data),
                 id: Some(digest.clone()),

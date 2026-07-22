@@ -9,7 +9,7 @@ use crate::tui::state::AppState;
 pub struct ImageDetailsWidget;
 
 impl ImageDetailsWidget {
-    pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
+    pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
         let title = match state.focus {
             crate::tui::state::FocusPane::ImageDetails => "Image Details [*]",
             _ => "Image Details",
@@ -46,11 +46,42 @@ impl ImageDetailsWidget {
             Text::from("No analysis report available.")
         };
 
+        // Clamp scroll so it doesn't go past the content.
+        let inner_width = area.width.saturating_sub(2) as usize;
+        let content_height = area.height.saturating_sub(2) as usize;
+        let total_estimated = estimate_wrapped_lines(&text, inner_width).max(1);
+        if total_estimated > content_height {
+            let max_scroll = total_estimated - content_height;
+            if state.image_details_scroll > max_scroll {
+                state.image_details_scroll = max_scroll;
+            }
+        } else {
+            state.image_details_scroll = 0;
+        }
+
         let paragraph = Paragraph::new(text)
             .block(Block::bordered().title(title))
-            .wrap(ratatui::widgets::Wrap { trim: false });
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((state.image_details_scroll as u16, 0));
         frame.render_widget(paragraph, area);
     }
+}
+
+/// Estimate the number of lines the text will produce when wrapped at max_width.
+fn estimate_wrapped_lines(text: &Text, max_width: usize) -> usize {
+    if max_width == 0 {
+        return text.lines.len();
+    }
+    let mut total = 0usize;
+    for line in &text.lines {
+        let width: usize = line.spans.iter().map(|s| s.content.len()).sum();
+        if width == 0 {
+            total += 1;
+        } else {
+            total += width.div_ceil(max_width);
+        }
+    }
+    total
 }
 
 #[cfg(test)]

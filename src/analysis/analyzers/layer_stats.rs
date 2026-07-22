@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use anyhow::Result;
 
 use crate::analysis::filetree::FileTree;
-use crate::analysis::report::{AnalysisItem, AnalysisResult, AnalysisSection, Analyzer};
+use crate::analysis::report::{AnalysisResult, AnalysisSection, Analyzer};
 use crate::image::Image;
 
 #[derive(Debug, Clone)]
@@ -49,27 +49,7 @@ impl AnalysisResult for LayerStatsResult {
     }
 
     fn details(&self) -> Vec<AnalysisSection> {
-        let mut items = Vec::new();
-        for stat in &self.layers {
-            items.push(AnalysisItem {
-                label: format!("#{}: {}", stat.index, stat.command),
-                value: format!(
-                    "raw={} unique={} wasted={} files={} dirs={} wh={} {:.1}% of image ({:.1}% cumulative)",
-                    crate::utils::format_size(stat.raw_size),
-                    crate::utils::format_size(stat.unique_size),
-                    crate::utils::format_size(stat.wasted_size),
-                    stat.file_count,
-                    stat.dir_count,
-                    stat.whiteout_count,
-                    stat.percent_of_image * 100.0,
-                    stat.cumulative_percent * 100.0,
-                ),
-            });
-        }
-        vec![AnalysisSection {
-            title: "Per-layer metrics".to_string(),
-            items,
-        }]
+        vec![]
     }
 }
 

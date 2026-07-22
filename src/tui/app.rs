@@ -209,7 +209,7 @@ where
                     }
                     FocusPane::LayerDetails => handle_layer_details_keys(&mut state, key),
                     FocusPane::ImageDetails => {
-                        // Image details is view-only; Tab/arrow keys handle focus.
+                        handle_image_details_keys(&mut state, key, terminal);
                     }
                 }
             }
@@ -446,6 +446,27 @@ fn current_tree(state: &AppState, comparer: &mut Comparer) -> crate::analysis::f
     tree.set_sort_mode(state.sort_mode);
     state.apply_collapsed_to_tree(&mut tree);
     tree
+}
+
+fn handle_image_details_keys<B: Backend>(
+    state: &mut AppState,
+    key: event::KeyEvent,
+    terminal: &Terminal<B>,
+) {
+    let page_size = page_height(terminal);
+    if state.config.key_matches("prev_tree_node", key)
+        || state.config.key_matches("prev_layer", key)
+    {
+        state.scroll_image_details_up();
+    } else if state.config.key_matches("next_tree_node", key)
+        || state.config.key_matches("next_layer", key)
+    {
+        state.scroll_image_details_down();
+    } else if state.config.key_matches("page_up", key) {
+        state.image_details_scroll = state.image_details_scroll.saturating_sub(page_size);
+    } else if state.config.key_matches("page_down", key) {
+        state.image_details_scroll = state.image_details_scroll.saturating_add(page_size);
+    }
 }
 
 fn page_height<B: Backend>(terminal: &Terminal<B>) -> usize {

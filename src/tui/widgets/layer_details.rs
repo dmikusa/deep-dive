@@ -83,6 +83,46 @@ impl LayerDetailsWidget {
                 label: "Tags",
                 value: tags,
             });
+
+            // Per-layer metrics from the Layer Stats analyzer, if available.
+            if let Some(stats) = state.layer_stats_for_current_layer() {
+                fields.push(DetailField {
+                    label: "Unique Size",
+                    value: format_size(stats.unique_size),
+                });
+                fields.push(DetailField {
+                    label: "Wasted Size",
+                    value: format_size(stats.wasted_size),
+                });
+                fields.push(DetailField {
+                    label: "File Count",
+                    value: stats.file_count.to_string(),
+                });
+                fields.push(DetailField {
+                    label: "Dir Count",
+                    value: stats.dir_count.to_string(),
+                });
+                fields.push(DetailField {
+                    label: "Symlink Count",
+                    value: stats.symlink_count.to_string(),
+                });
+                fields.push(DetailField {
+                    label: "Whiteout Count",
+                    value: stats.whiteout_count.to_string(),
+                });
+                fields.push(DetailField {
+                    label: "Whiteout Bytes",
+                    value: format_size(stats.whiteout_bytes),
+                });
+                fields.push(DetailField {
+                    label: "% of Image",
+                    value: format!("{:.1}%", stats.percent_of_image * 100.0),
+                });
+                fields.push(DetailField {
+                    label: "Cumulative %",
+                    value: format!("{:.1}%", stats.cumulative_percent * 100.0),
+                });
+            }
         }
         fields
     }
