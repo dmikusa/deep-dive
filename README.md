@@ -248,3 +248,9 @@ See [LICENSE](LICENSE) for details.
 ## Acknowledgements
 
 Inspired by [dive](https://github.com/wagoodman/dive) by Alex Goodman.
+
+AI tools were used to create this project, in particular Opencode with models Kimi K2.7 Code
+and DeepSeek V4 Flash. Kimi K2.7 Code was driven to generate [docs/plan.md](docs/plan.md)
+based on review of the original dive tool as well as new requirements. Kimi & DeepSeek were
+used to then generate the code according to the plan. The generated code and the application
+were human reviewed and tested.
